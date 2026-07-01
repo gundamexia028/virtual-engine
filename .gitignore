@@ -1,0 +1,42 @@
+# Project archives and local working material
+working/
+source_packages/
+releases/
+
+# Python environments and caches
+**/.venv/
+**/venv/
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.coverage
+**/htmlcov/
+
+# Local secrets and machine-specific configuration
+**/.streamlit/secrets.toml
+**/config/org_access_codes.json
+.env
+.env.local
+.env.*.local
+
+# Runtime data and recovery state
+**/.runtime/
+**/runs/
+**/runs_web/
+**/*.jsonl
+**/*.sqlite
+**/*.sqlite3
+**/*.db
+**/*.log
+**/*.tmp
+
+# Operating system and editor files
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+

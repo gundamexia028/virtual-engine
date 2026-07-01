@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.streamlit/secrets.toml
+config/org_access_codes.json
+.DS_Store
+runs/
+runs_web/
+.runtime/
+*.log

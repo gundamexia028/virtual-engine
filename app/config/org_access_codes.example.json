@@ -1,0 +1,20 @@
+[
+  {
+    "organization_id": "ACD_EXAMPLE",
+    "organization_type": "academy",
+    "role": "academy_admin",
+    "school_name": "示例护理职业学院",
+    "hospital_name": "",
+    "department_name": "护理学院",
+    "credential": {
+      "algorithm": "pbkdf2_hmac_sha256",
+      "iterations": 600000,
+      "salt": "REPLACE_WITH_TOOL_OUTPUT",
+      "digest": "REPLACE_WITH_TOOL_OUTPUT"
+    },
+    "permissions": ["view", "export"],
+    "status": "active",
+    "created_at": "2026-05-31T00:00:00",
+    "note": "结构示例，不含可用凭据；必须使用本机命令行工具生成"
+  }
+]
