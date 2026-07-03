@@ -2,11 +2,11 @@
 
 ## 1. 状态更新时间
 
-更新时间：2026-07-01
+更新时间：2026-07-03
 
-当前阶段：模块化重构第1阶段“行为契约与黄金基线”已完成，运行时逻辑未改变
+当前阶段：模块化重构第2阶段“情景目录与加载器拆分”已完成，等待Pull Request审查
 
-状态性质：`app/`已建立场景结构契约、12条黄金行为路径和175项自动回归基线；`working/`保留基线、迁移前快照、报告和回滚资料；生产Supabase、RLS和正式试用仍未验证
+状态性质：`app/`已建立4情景统一注册表、纯Python加载器、12条黄金行为路径和197项自动回归基线；4份情景JSON及其医学、评分和结束行为未改变；生产Supabase、RLS和正式试用仍未验证
 
 本文件依据：
 
@@ -514,6 +514,33 @@
 * `app/tests/golden_behavior_tests.py`
 * `app/tests/golden/v1_3_8_behavior_baseline.json`
 
+### 4.23 模块化重构第2阶段：情景目录与加载器拆分
+
+已完成：
+
+* 保留`app/peds_anaphylaxis_sim/scenarios/`为4份现有情景定义的集中目录；
+* 新增`scenario_catalog.py`，集中登记情景ID、脚本角色、文件名、系统模式、适用阶段、顺序和学院情景库ID；
+* 新增`scenario_loader.py`，统一按情景ID、脚本角色、`system_mode + phase + library_id`或已登记路径加载情景；
+* 入口页不再扫描情景目录，也不再根据分散JSON元数据自行决定阶段脚本；
+* 引擎的通用文件加载入口委托给统一加载器，保留现有JSON及可选YAML兼容行为；
+* 恢复草稿只接受已登记情景路径，并再次核对情景身份；
+* 4份情景、6组阶段映射、12条黄金路径、82个动作和44条动态规则均保持一致；
+* 4份情景JSON的SHA-256保持不变，黄金JSON快照无差异；
+* 新增加载器和注册表专项测试22项，22/22通过；
+* 原有175项测试继续通过，当前合计197/197；
+* 未修改病例、医学内容、评分、生命体征、结束条件、页面文案、存储、权限、认证或问卷；
+* 测试临时Secrets、缓存和JSONL临时数据已清理；
+* 未连接Supabase或其他外部业务服务。
+
+证据：
+
+* `app/peds_anaphylaxis_sim/scenario_catalog.py`
+* `app/peds_anaphylaxis_sim/scenario_loader.py`
+* `app/tests/scenario_loader_tests.py`
+* `app/tests/scenario_contract_tests.py`
+* `app/tests/golden_behavior_tests.py`
+* `app/tests/golden/v1_3_8_behavior_baseline.json`
+
 ## 5. 已确认技术事实
 
 以下内容依据只读审计、环境审计、依赖安装、配置建立和本地冒烟测试报告。
@@ -810,16 +837,16 @@ README当前标题和版本定位均为V1.3.8。
 
 下一阶段为：
 
-在第1阶段Pull Request审查通过后，执行模块化重构第2阶段“情景目录、加载器和流程策略拆分”。
+在第2阶段Pull Request审查通过后，执行模块化重构第3阶段“应用流程与会话恢复拆分”。
 
 建议顺序：
 
-1. 审查结构契约、行为契约和12条黄金快照；
-2. 每次提交前运行175项回归并核对4份场景哈希；
-3. 第2阶段先建立情景manifest和纯Python加载器；
-4. 使用`scenario_id + phase`定位脚本并保持4份旧脚本兼容；
-5. 将模式、阶段和情景元数据移出UI入口文件；
-6. 不在第2阶段修改`Simulator`医学逻辑、评分、病例或结果格式；
+1. 审查统一情景注册表、加载器和22项专项测试；
+2. 每次提交前运行197项回归并核对4份情景哈希和12条黄金快照；
+3. 建立应用流程协调器；
+4. 将开始、完成、结果页、返回和重置转为显式状态转换；
+5. 将草稿文件操作与Streamlit query/session适配分开；
+6. 保持现有快照schema、恢复行为、医学、评分和结果格式不变；
 7. 生产接入条件未满足前不得连接生产Supabase或部署。
 
 ## 12. 当前结论
@@ -841,9 +868,10 @@ README当前标题和版本定位均为V1.3.8。
 * Python 3.13首次运行验证；
 * 默认凭据安全修复；
 * V1.3.8版本语义审计与最小统一；
-* 175项自动测试，其中原有139项继续通过；
+* 197项自动测试，其中第2阶段新增22项加载器和注册表专项测试；
 * 模块化架构评估与6阶段重构计划；
 * 场景行为契约、20项结构校验和12条黄金行为路径；
+* 模块化第2阶段统一情景注册表、纯Python加载器和阶段路由；
 * 临床和学院核心业务全流程验证；
 * 临床、学院、训练和考核四类流程的刷新恢复专项验证；
 * 临床训练localhost真实刷新恢复验证；
@@ -875,7 +903,7 @@ README当前标题和版本定位均为V1.3.8。
 
 当前项目技术实现状态应表述为：
 
-`正式Git开发目录app/已建立，模块化重构第1阶段的场景结构契约、行为契约、12条黄金路径和175项自动测试均已完成；运行时逻辑、病例、评分、页面、存储和权限实现未改变。生产Supabase、RLS、历史机构ID迁移和正式试用仍未验证，因此当前仍不具备生产接入或生产部署条件。`
+`正式Git开发目录app/已建立，模块化重构第2阶段已完成统一情景注册表与加载器拆分，4份情景、12条黄金路径、82个动作、44条动态规则和197项自动测试均保持通过；病例、医学内容、评分、生命体征、结束条件、页面表现、存储和权限行为未改变。生产Supabase、RLS、历史机构ID迁移和正式试用仍未验证，因此当前仍不具备生产接入或生产部署条件。`
 
 当前正式目录相对只读基线的计划内业务变化：
 
@@ -883,6 +911,8 @@ README当前标题和版本定位均为V1.3.8。
 * 新增安全模块与工具：`peds_anaphylaxis_sim/org_credentials.py`、`tools/generate_org_admin_credential.py`；
 * 新增测试：`tests/credential_security_tests.py`、`tests/version_consistency_tests.py`、`tests/full_workflow_validation.py`、`tests/session_recovery_tests.py`、`tests/clinical_result_page_tests.py`、`tests/academy_questionnaire_idempotency_tests.py`、`tests/organization_authorization_tests.py`、`tests/org_credential_security_tests.py`；
 * 新增模块化基线测试：`tests/scenario_contract_tests.py`、`tests/golden_behavior_tests.py`和`tests/golden/v1_3_8_behavior_baseline.json`；
+* 新增情景注册表与加载器：`peds_anaphylaxis_sim/scenario_catalog.py`、`peds_anaphylaxis_sim/scenario_loader.py`；
+* 新增加载器专项测试：`tests/scenario_loader_tests.py`；
 * 病例JSON、评分标准、问卷题目和版本号未因本次管理码修复改变；
 * 只读基线28个文件的大小和SHA-256仍与登记一致；
 * `.pyc`和`__pycache__`属于运行缓存，已由根目录`.gitignore`排除；

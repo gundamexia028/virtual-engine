@@ -17,10 +17,15 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import streamlit_app as app  # noqa: E402
-from peds_anaphylaxis_sim.engine import Simulator, load_scenario  # noqa: E402
+from peds_anaphylaxis_sim.engine import Simulator  # noqa: E402
+from peds_anaphylaxis_sim.scenario_catalog import (  # noqa: E402
+    scenario_definition,
+)
+from peds_anaphylaxis_sim.scenario_loader import (  # noqa: E402
+    load_registered_scenario,
+)
 
 
-SCENARIO_DIR = ROOT / "peds_anaphylaxis_sim" / "scenarios"
 GOLDEN_PATH = ROOT / "tests" / "golden" / "v1_3_8_behavior_baseline.json"
 GOLDEN_CONTRACT_VERSION = 1
 
@@ -60,7 +65,7 @@ FLOW_DEFINITIONS = {
         "system_mode_label": "临床模式",
         "assessment_phase": "模拟培训",
         "workflow_mode": "coach",
-        "scenario_file": "peds_ward_anaphylaxis_iv_initial.json",
+        "scenario_id": "peds_ward_anaphylaxis_iv_initial",
         "standard_steps": CLINICAL_STANDARD_STEPS,
         "error_prefix": [("action", "continue_infusion")],
         "branch_prefix": [
@@ -73,7 +78,7 @@ FLOW_DEFINITIONS = {
         "system_mode_label": "临床模式",
         "assessment_phase": "培训后考核",
         "workflow_mode": "exam",
-        "scenario_file": "peds_ward_anaphylaxis_iv_variantA.json",
+        "scenario_id": "peds_ward_anaphylaxis_iv_variantA",
         "standard_steps": CLINICAL_STANDARD_STEPS,
         "error_prefix": [("action", "continue_infusion")],
         "branch_prefix": [
@@ -86,7 +91,7 @@ FLOW_DEFINITIONS = {
         "system_mode_label": "学院模式",
         "assessment_phase": "模拟训练",
         "workflow_mode": "coach",
-        "scenario_file": "peds_ward_allergy_academy_initial.json",
+        "scenario_id": "peds_ward_allergy_academy_initial",
         "standard_steps": ACADEMY_STANDARD_STEPS,
         "error_prefix": [("action", "watch_only")],
         "branch_prefix": [("action", "student_independent_epinephrine")],
@@ -96,7 +101,7 @@ FLOW_DEFINITIONS = {
         "system_mode_label": "学院模式",
         "assessment_phase": "课后考核",
         "workflow_mode": "exam",
-        "scenario_file": "peds_ward_allergy_academy_variant.json",
+        "scenario_id": "peds_ward_allergy_academy_variant",
         "standard_steps": ACADEMY_STANDARD_STEPS,
         "error_prefix": [("action", "watch_only")],
         "branch_prefix": [("action", "student_independent_epinephrine")],
@@ -172,9 +177,9 @@ def _normalized_feedback(report: dict) -> dict:
 
 def build_normalized_snapshot(flow_id: str, path_kind: str) -> dict:
     definition = FLOW_DEFINITIONS[flow_id]
-    scenario_path = SCENARIO_DIR / definition["scenario_file"]
+    catalog_entry = scenario_definition(definition["scenario_id"])
     sim = Simulator(
-        load_scenario(str(scenario_path)),
+        load_registered_scenario(catalog_entry.scenario_id),
         mode=definition["workflow_mode"],
         seed=123,
     )
@@ -206,7 +211,7 @@ def build_normalized_snapshot(flow_id: str, path_kind: str) -> dict:
         "contract_version": GOLDEN_CONTRACT_VERSION,
         "flow_id": flow_id,
         "path_kind": path_kind,
-        "scenario_file": definition["scenario_file"],
+        "scenario_file": catalog_entry.file_name,
         "scenario_id": report["scenario_id"],
         "system_mode": definition["system_mode"],
         "workflow_mode": definition["workflow_mode"],

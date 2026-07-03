@@ -48,14 +48,27 @@ from typing import Dict, Any, List, Set, Optional, Tuple
 import streamlit as st
 
 from peds_anaphylaxis_sim import SYSTEM_VERSION
-from peds_anaphylaxis_sim.engine import Simulator, load_scenario, save_report
+from peds_anaphylaxis_sim.engine import Simulator, save_report
 from peds_anaphylaxis_sim import org_credentials
+from peds_anaphylaxis_sim.scenario_catalog import (
+    SCENARIO_DIRECTORY,
+    ScenarioCatalogError,
+    find_scenario_definition_by_role,
+    scenario_definition_for_path,
+    scenario_definition_for_phase,
+    scenario_definitions,
+)
+from peds_anaphylaxis_sim.scenario_loader import (
+    load_registered_scenario,
+    load_registered_scenario_path,
+    load_scenario_file as load_scenario,
+)
 
 
 APP_TITLE = "护理动态分支虚拟仿真训练与评估平台"
 APP_SUBTITLE = "Dynamic Branching Virtual Simulation Platform for Nursing Training and Education"
 ROOT = Path(__file__).resolve().parent
-SCENARIO_DIR = ROOT / "peds_anaphylaxis_sim" / "scenarios"
+SCENARIO_DIR = SCENARIO_DIRECTORY
 RUNS_DIR = Path(os.environ.get("PEDSIM_RESULTS_DIR", str(ROOT / "runs_web")))
 RESULTS_INDEX_PATH = RUNS_DIR / "training_results.jsonl"
 RESULTS_FULL_REPORTS_PATH = RUNS_DIR / "training_full_reports.jsonl"
@@ -359,34 +372,42 @@ def participant_code_parts(campus: str, department: str, initials: str) -> Dict[
 def list_scenarios() -> Dict[str, Path]:
     """Only expose the two bedside scripts requested for the web prototype."""
     items = []
-    role_order = {"initial": 0, "variant": 1, "academy_initial": 2, "academy_variant": 3}
-    for path in sorted(SCENARIO_DIR.glob("*.json")):
+    for definition in scenario_definitions():
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = load_registered_scenario(definition.scenario_id)
             meta = data.get("scenario", {})
-            role = meta.get("script_role", "")
-            if role not in role_order:
-                continue
-            display_name = meta.get("display_name") or meta.get("title", path.stem)
+            display_name = (
+                meta.get("display_name")
+                or meta.get("title", definition.path.stem)
+            )
             version = meta.get("version", "")
             label = f"{display_name}｜{version}" if version else str(display_name)
-            items.append((role_order[role], label, path))
-        except Exception:
+            items.append((definition.order, label, definition.path))
+        except (OSError, ValueError, json.JSONDecodeError):
             continue
     return {label: path for _, label, path in sorted(items, key=lambda x: x[0])}
 
 
 def scenario_path_by_role(role: str) -> Optional[Path]:
     """Return the scenario path matching the locked workflow script role."""
-    for path in sorted(SCENARIO_DIR.glob("*.json")):
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            meta = data.get("scenario", {})
-            if meta.get("script_role", "") == role:
-                return path
-        except Exception:
-            continue
-    return None
+    definition = find_scenario_definition_by_role(role)
+    return definition.path if definition is not None else None
+
+
+def scenario_path_for_phase(
+    system_mode: str,
+    phase: str,
+    academy_scenario_id: str = "",
+) -> Optional[Path]:
+    library_id = academy_scenario_id if system_mode == "academy" else ""
+    try:
+        return scenario_definition_for_phase(
+            system_mode,
+            phase,
+            library_id,
+        ).path
+    except ScenarioCatalogError:
+        return None
 
 
 def safe_filename_part(text: str) -> str:
@@ -830,10 +851,17 @@ def restore_training_draft_from_query(now: Optional[float] = None) -> bool:
         if unknown_keys:
             raise ValueError("Draft contains unsupported session fields.")
         simulator = Simulator.from_snapshot(payload.get("simulator"))
-        scenario_path = Path(str(session_data.get("active_scenario_path", ""))).resolve()
-        if not scenario_path.is_relative_to(SCENARIO_DIR.resolve()) or not scenario_path.is_file():
+        scenario_path = Path(
+            str(session_data.get("active_scenario_path", ""))
+        ).resolve()
+        definition = scenario_definition_for_path(scenario_path)
+        if definition is None or not scenario_path.is_file():
             raise ValueError("Draft scenario path is invalid.")
-        if simulator.scenario.get("scenario", {}).get("id") != load_scenario(str(scenario_path)).get("scenario", {}).get("id"):
+        registered_scenario = load_registered_scenario_path(scenario_path)
+        if (
+            simulator.scenario.get("scenario", {}).get("id")
+            != registered_scenario.get("scenario", {}).get("id")
+        ):
             raise ValueError("Draft scenario identity mismatch.")
         for key, value in session_data.items():
             st.session_state[key] = value
@@ -2634,7 +2662,12 @@ def start_simulation(scenario_path: Path, mode: str, seed: int, participant_id: 
     st.session_state.organization_type = current_system_mode()
     if not _valid_organization_id(st.session_state.get("organization_id", "")):
         st.session_state.organization_id = ""
-    scenario_source = load_scenario(str(scenario_path))
+    definition = scenario_definition_for_path(scenario_path)
+    scenario_source = (
+        load_registered_scenario(definition.scenario_id)
+        if definition is not None
+        else load_scenario(str(scenario_path))
+    )
     scenario = randomize_patient_profile(scenario_source)
     sim = Simulator(scenario, mode=mode, seed=seed)
     meta = scenario.get("scenario", {})
@@ -3667,7 +3700,11 @@ def render_sidebar() -> None:
         unsafe_allow_html=True,
     )
 
-    scenario_path = scenario_path_by_role(workflow.get("script_role", "initial"))
+    scenario_path = scenario_path_for_phase(
+        mode,
+        st.session_state.get("assessment_phase", default_phase_for_mode(mode)),
+        current_academy_scenario_id() if mode == "academy" else "",
+    )
     if scenario_path is None:
         st.sidebar.error("未找到本阶段对应的病例脚本，请检查 scenarios 文件夹。")
     elif st.sidebar.button("开始/重置本阶段任务", type="primary", use_container_width=True):
