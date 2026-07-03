@@ -17,16 +17,18 @@ sys.path.insert(0, str(ROOT))
 
 import streamlit_app as app  # noqa: E402
 from peds_anaphylaxis_sim.engine import Simulator, load_scenario  # noqa: E402
+from peds_anaphylaxis_sim.scenario_catalog import (  # noqa: E402
+    scenario_definitions,
+)
 
 
-SCENARIOS = ROOT / "peds_anaphylaxis_sim" / "scenarios"
 CLINICAL_SCENARIOS = [
-    SCENARIOS / "peds_ward_anaphylaxis_iv_initial.json",
-    SCENARIOS / "peds_ward_anaphylaxis_iv_variantA.json",
+    definition.path
+    for definition in scenario_definitions("clinical")
 ]
 ACADEMY_SCENARIOS = [
-    SCENARIOS / "peds_ward_allergy_academy_initial.json",
-    SCENARIOS / "peds_ward_allergy_academy_variant.json",
+    definition.path
+    for definition in scenario_definitions("academy")
 ]
 CLINICAL_STANDARD_ACTIONS = [
     "stop_infusion",

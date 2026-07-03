@@ -13,14 +13,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import streamlit_app as app  # noqa: E402
-
-
-ACADEMY_SCENARIO = (
-    ROOT
-    / "peds_anaphylaxis_sim"
-    / "scenarios"
-    / "peds_ward_allergy_academy_variant.json"
+from peds_anaphylaxis_sim.scenario_catalog import (  # noqa: E402
+    scenario_definition,
 )
+
+
+ACADEMY_SCENARIO = scenario_definition(
+    "peds_ward_allergy_academy_variant"
+).path
 
 
 class State(dict):

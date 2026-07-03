@@ -37,10 +37,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from peds_anaphylaxis_sim.engine import Simulator, load_scenario  # noqa: E402
+from peds_anaphylaxis_sim.scenario_catalog import scenario_definition  # noqa: E402
 from streamlit_app import build_data_quality_records, build_participant_analysis_records  # noqa: E402
 
 
-SCENARIO = ROOT / "peds_anaphylaxis_sim" / "scenarios" / "peds_ward_anaphylaxis_iv_initial.json"
+SCENARIO = scenario_definition("peds_ward_anaphylaxis_iv_initial").path
 
 
 def tick_action(sim: Simulator, action_id: str) -> None:

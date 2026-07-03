@@ -28,6 +28,12 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 
+try:
+    from .scenario_loader import load_scenario_file
+except ImportError:  # pragma: no cover - direct engine.py compatibility
+    from scenario_loader import load_scenario_file  # type: ignore
+
+
 def clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
 
@@ -35,18 +41,7 @@ def now_stamp() -> str:
     return _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
 
 def load_scenario(path: str) -> Dict[str, Any]:
-    if path.lower().endswith(".json"):
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    try:
-        import yaml  # type: ignore
-    except Exception as e:
-        raise RuntimeError(
-            "YAML scenario requires PyYAML. Install with: pip install pyyaml\n"
-            f"Original error: {e}"
-        )
-    with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    return load_scenario_file(path)
 
 @dataclass
 class SimState:

@@ -4,11 +4,24 @@ from collections import defaultdict, deque
 import hashlib
 import json
 from pathlib import Path
+import sys
 import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCENARIO_DIR = ROOT / "peds_anaphylaxis_sim" / "scenarios"
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from peds_anaphylaxis_sim.scenario_catalog import (  # noqa: E402
+    SCENARIO_DIRECTORY,
+    scenario_definitions,
+)
+from peds_anaphylaxis_sim.scenario_loader import (  # noqa: E402
+    load_registered_scenario,
+)
+
+
+SCENARIO_DIR = SCENARIO_DIRECTORY
 EXPECTED_SCENARIO_HASHES = {
     "peds_ward_allergy_academy_initial.json": "ea4b0602126b2d9d93c4a9eb56b7bf95d4b52b6caea3d67acc0b372687adebee",
     "peds_ward_allergy_academy_variant.json": "694d19aa42be2ca3151bf730d9eb9836031e4adc578a4a7359948c68b1b4e475",
@@ -27,8 +40,8 @@ class ScenarioContractError(ValueError):
 
 def load_documents() -> dict[str, dict]:
     return {
-        path.name: json.loads(path.read_text(encoding="utf-8"))
-        for path in sorted(SCENARIO_DIR.glob("*.json"))
+        definition.file_name: load_registered_scenario(definition.scenario_id)
+        for definition in scenario_definitions()
     }
 
 
@@ -663,8 +676,10 @@ class ScenarioContractTests(unittest.TestCase):
 
     def test_scenario_source_hashes_are_unchanged(self):
         actual = {
-            path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-            for path in sorted(SCENARIO_DIR.glob("*.json"))
+            definition.file_name: hashlib.sha256(
+                definition.path.read_bytes()
+            ).hexdigest()
+            for definition in scenario_definitions()
         }
         self.assertEqual(actual, EXPECTED_SCENARIO_HASHES)
 
