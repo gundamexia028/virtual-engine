@@ -30,8 +30,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 try:
     from .scenario_loader import load_scenario_file
+    from .flow_strategies import flow_strategy_for_scenario
 except ImportError:  # pragma: no cover - direct engine.py compatibility
     from scenario_loader import load_scenario_file  # type: ignore
+    from flow_strategies import flow_strategy_for_scenario  # type: ignore
 
 
 def clamp(x: float, lo: float, hi: float) -> float:
@@ -76,15 +78,20 @@ class Simulator:
     def __init__(self, scenario: Dict[str, Any], mode: str = "coach", seed: int = -1):
         self.scenario = scenario
         self.mode = mode
+        self.flow_strategy = flow_strategy_for_scenario(scenario, mode)
         # Guided prompts (coach mode): show one prompt at a time, advance when satisfied
-        self.guided_prompts = scenario.get('training', {}).get('guided_prompts', []) if mode == 'coach' else []
+        self.guided_prompts = (
+            scenario.get("training", {}).get("guided_prompts", [])
+            if self.flow_strategy.use_guided_prompts
+            else []
+        )
         self.guided_index = 0
         self.actions = scenario["actions"]
         # Randomization: shuffle option order in exam mode to avoid patterned sequences
         self.seed = seed if seed is not None else -1
         if self.seed == -1:
             self.seed = int(_dt.datetime.now().timestamp())
-        if mode == "exam":
+        if self.flow_strategy.shuffle_actions:
             rnd = __import__("random").Random(self.seed)
             self.actions = list(self.actions)
             rnd.shuffle(self.actions)
@@ -636,7 +643,11 @@ class Simulator:
         return "患儿仍有轻度皮肤不适和呼吸道不适表现。"
 
     def format_status(self) -> str:
-        prompt = self.get_guided_prompt() if self.mode == "coach" else ""
+        prompt = (
+            self.get_guided_prompt()
+            if self.flow_strategy.use_guided_prompts
+            else ""
+        )
         prompt_line = f"当前提示：{prompt}\n" if prompt else ""
         return (
             f"时间：{self.state.t:>4}s\n"
@@ -646,7 +657,7 @@ class Simulator:
         )
 
     def print_coach_hint(self) -> None:
-        if self.mode != "coach":
+        if not self.flow_strategy.show_immediate_feedback:
             return
         hints = []
         if not self.state.flags.get("stopped_infusion", False):
@@ -2395,7 +2406,7 @@ def run_interactive(sim: Simulator) -> Dict[str, Any]:
         for i, a in enumerate(sim.actions, start=1):
             print(f"{i:>2}. {a['label']}")
         print(f"{'T':>2}. 时间流逝 {sim.tick_seconds}s")
-        if sim.mode != "exam":
+        if sim.flow_strategy.allow_cli_manual_completion:
             print(f"{'Q':>2}. 结束并生成报告")
 
         choice = input("请选择操作编号：").strip().lower()
@@ -2403,7 +2414,7 @@ def run_interactive(sim: Simulator) -> Dict[str, Any]:
             sim.tick()
             continue
         if choice == "q":
-            if sim.mode == "exam":
+            if not sim.flow_strategy.allow_cli_manual_completion:
                 print("考试模式不支持提前结束，请继续完成情景。\n")
                 continue
             break

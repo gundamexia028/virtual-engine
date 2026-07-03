@@ -50,6 +50,16 @@ import streamlit as st
 from peds_anaphylaxis_sim import SYSTEM_VERSION
 from peds_anaphylaxis_sim.engine import Simulator, save_report
 from peds_anaphylaxis_sim import org_credentials
+from peds_anaphylaxis_sim.flow_strategies import (
+    FlowStrategyError,
+    SimulationFlowStrategy,
+    build_workflow_config,
+    flow_strategy_for_modes,
+    flow_strategy_for_phase,
+    flow_strategy_for_scenario,
+    phase_options as strategy_phase_options,
+    system_mode_options,
+)
 from peds_anaphylaxis_sim.scenario_catalog import (
     SCENARIO_DIRECTORY,
     ScenarioCatalogError,
@@ -106,21 +116,9 @@ DEPARTMENT_CODES = {
     "消化科": "XHK",
 }
 
-SYSTEM_MODE_OPTIONS = {
-    "clinical": {
-        "label": "临床模式",
-        "subtitle": "面向临床护士/低年资护士，保留原严重过敏反应动态分支处置流程。",
-        "participant_type": "clinical_nurse",
-    },
-    "academy": {
-        "label": "学院模式",
-        "subtitle": "面向在校护生，进入通用情景库后选择教学情景；当前仅开放严重过敏反应/过敏性休克抢救。",
-        "participant_type": "nursing_student",
-    },
-}
-
-CLINICAL_ASSESSMENT_PHASE_OPTIONS = ["基线评估", "模拟培训", "培训后考核"]
-ACADEMY_ASSESSMENT_PHASE_OPTIONS = ["课前测评", "模拟训练", "课后考核"]
+SYSTEM_MODE_OPTIONS = system_mode_options()
+CLINICAL_ASSESSMENT_PHASE_OPTIONS = list(strategy_phase_options("clinical"))
+ACADEMY_ASSESSMENT_PHASE_OPTIONS = list(strategy_phase_options("academy"))
 ALL_ASSESSMENT_PHASE_OPTIONS = CLINICAL_ASSESSMENT_PHASE_OPTIONS + ACADEMY_ASSESSMENT_PHASE_OPTIONS
 # Backward-compatible alias used by older clinical UI/export code.
 ASSESSMENT_PHASE_OPTIONS = CLINICAL_ASSESSMENT_PHASE_OPTIONS
@@ -187,73 +185,9 @@ ACADEMY_SCENARIO_LIBRARY = {
         "status": "已开放",
         "description": "面向在校护生，训练严重过敏反应早期识别、暂停可疑输入、保留静脉通道、及时呼救、基础氧疗与循环监测、抢救用物准备、药物核对配合、基础复评、家属安抚与SBAR汇报。",
         "target_users": "在校护生",
-        "phase_script_roles": {
-            "课前测评": "academy_initial",
-            "模拟训练": "academy_initial",
-            "课后考核": "academy_variant",
-        },
-        "phase_script_labels": {
-            "课前测评": "过敏性休克抢救基础病例",
-            "模拟训练": "过敏性休克抢救基础病例",
-            "课后考核": "过敏性休克抢救变体病例",
-        },
-        "phase_tasks": {
-            "课前测评": "请根据患儿表现独立判断当前异常情况，并完成暂停可疑输入、呼救、氧疗监测、抢救配合、复评与汇报；不要求护生独立用药。",
-            "模拟训练": "请在训练模式下完成过敏性休克抢救基础教学训练。系统将提供步骤提示与原因说明。",
-            "课后考核": "请按考试要求独立完成变体病例，重点体现严重过敏反应早期识别、抢救启动、规范汇报与协作意识。",
-        },
     }
 }
 ACADEMY_SCENARIO_DEFAULT_ID = "academy_anaphylaxis_rescue"
-
-WORKFLOW_RULES = {
-    "clinical": {
-        "基线评估": {
-            "mode": "exam",
-            "script_role": "initial",
-            "script_label": "初始病例",
-            "display": "基线评估｜考试模式｜初始病例",
-            "task": "请按考试要求独立完成初始病例处置。系统不会提供步骤原因提示。",
-        },
-        "模拟培训": {
-            "mode": "coach",
-            "script_role": "initial",
-            "script_label": "初始病例",
-            "display": "模拟培训｜训练模式｜初始病例",
-            "task": "请在训练模式下完成初始病例。系统将提供必要的步骤提示与复盘信息。",
-        },
-        "培训后考核": {
-            "mode": "exam",
-            "script_role": "variant",
-            "script_label": "变体病例 Variant A",
-            "display": "培训后考核｜考试模式｜变体病例 Variant A",
-            "task": "请按考试要求独立完成变体病例处置。系统不会提供步骤原因提示。",
-        },
-    },
-    "academy": {
-        "课前测评": {
-            "mode": "exam",
-            "script_role": "academy_initial",
-            "script_label": "学院过敏性休克基础病例",
-            "display": "课前测评｜考试模式｜学院过敏性休克基础病例",
-            "task": "请根据患儿表现独立判断当前异常情况，并完成暂停可疑输入、呼救、氧疗监测、抢救配合、复评与汇报；不要求护生独立用药。",
-        },
-        "模拟训练": {
-            "mode": "coach",
-            "script_role": "academy_initial",
-            "script_label": "学院过敏性休克基础病例",
-            "display": "模拟训练｜训练模式｜学院过敏性休克基础病例",
-            "task": "请在训练模式下完成过敏性休克抢救基础教学训练。系统将提供步骤提示与原因说明。",
-        },
-        "课后考核": {
-            "mode": "exam",
-            "script_role": "academy_variant",
-            "script_label": "学院过敏性休克变体病例",
-            "display": "课后考核｜考试模式｜学院过敏性休克变体病例",
-            "task": "请按考试要求独立完成变体病例，重点体现异常识别、及时呼救、初步处置、抢救配合、复评、规范汇报与身份边界意识。",
-        },
-    },
-}
 
 
 def current_system_mode() -> str:
@@ -287,7 +221,10 @@ def academy_scenario_label(scenario_id: str) -> str:
 
 def phase_options_for_mode(system_mode: Optional[str] = None) -> List[str]:
     mode = system_mode or current_system_mode()
-    return ACADEMY_ASSESSMENT_PHASE_OPTIONS if mode == "academy" else CLINICAL_ASSESSMENT_PHASE_OPTIONS
+    try:
+        return list(strategy_phase_options(mode))
+    except FlowStrategyError:
+        return list(CLINICAL_ASSESSMENT_PHASE_OPTIONS)
 
 
 def default_phase_for_mode(system_mode: Optional[str] = None) -> str:
@@ -296,28 +233,34 @@ def default_phase_for_mode(system_mode: Optional[str] = None) -> str:
 
 def workflow_for_phase(phase: str, system_mode: Optional[str] = None) -> Dict[str, str]:
     mode = system_mode or current_system_mode()
-    default_phase = default_phase_for_mode(mode)
-    if mode == "academy":
-        scenario = current_academy_scenario()
-        phase = phase if phase in ACADEMY_ASSESSMENT_PHASE_OPTIONS else default_phase
-        mode_value = "coach" if phase == "模拟训练" else "exam"
-        script_role = (scenario.get("phase_script_roles", {}) or {}).get(phase, "academy_initial")
-        script_label = (scenario.get("phase_script_labels", {}) or {}).get(phase, scenario.get("name", "学院情景"))
-        task = (scenario.get("phase_tasks", {}) or {}).get(phase, scenario.get("description", ""))
-        return {
-            "mode": mode_value,
-            "script_role": script_role,
-            "script_label": script_label,
-            "display": f"{phase}｜{'训练模式' if mode_value == 'coach' else '考试模式'}｜{scenario.get('name', '学院情景')}｜{script_label}",
-            "task": task,
-            "scenario_id": scenario.get("id", current_academy_scenario_id()),
-            "scenario_name": scenario.get("name", ""),
-            "scenario_category": scenario.get("category", ""),
-            "course_type": scenario.get("course_type", ""),
-            "difficulty": scenario.get("difficulty", ""),
-        }
-    rules = WORKFLOW_RULES.get(mode, WORKFLOW_RULES["clinical"])
-    return rules.get(phase, rules[default_phase])
+    scenario = current_academy_scenario() if mode == "academy" else None
+    return build_workflow_config(
+        mode,
+        phase,
+        library_id=current_academy_scenario_id() if mode == "academy" else "",
+        scenario_metadata=scenario,
+    )
+
+
+def current_flow_strategy(
+    sim: Optional[Simulator] = None,
+) -> SimulationFlowStrategy:
+    if sim is None:
+        active = st.session_state.get("active_simulator")
+        if isinstance(active, Simulator):
+            sim = active
+    if isinstance(sim, Simulator):
+        strategy = getattr(sim, "flow_strategy", None)
+        if isinstance(strategy, SimulationFlowStrategy):
+            return strategy
+        return flow_strategy_for_scenario(sim.scenario, sim.mode)
+    return flow_strategy_for_phase(
+        current_system_mode(),
+        st.session_state.get(
+            "assessment_phase",
+            default_phase_for_mode(current_system_mode()),
+        ),
+    )
 
 
 def normalize_initials(text: str) -> str:
@@ -495,6 +438,7 @@ def init_session() -> None:
         "training_batch": "",
         "assessment_phase": "基线评估",
         "workflow_mode": "exam",
+        "flow_strategy_id": "clinical_exam",
         "workflow_script_role": "initial",
         "workflow_display": "基线评估｜考试模式｜初始病例",
         "workflow_locked": True,
@@ -602,6 +546,7 @@ DRAFT_SESSION_KEYS = (
     "training_batch",
     "assessment_phase",
     "workflow_mode",
+    "flow_strategy_id",
     "workflow_script_role",
     "workflow_display",
     "workflow_locked",
@@ -863,6 +808,23 @@ def restore_training_draft_from_query(now: Optional[float] = None) -> bool:
             != registered_scenario.get("scenario", {}).get("id")
         ):
             raise ValueError("Draft scenario identity mismatch.")
+        restored_strategy = current_flow_strategy(simulator)
+        if not restored_strategy.recovery.restore_in_progress:
+            raise ValueError("Draft recovery is disabled for this flow.")
+        if (
+            payload.get("schema_version")
+            != restored_strategy.recovery.snapshot_schema_version
+        ):
+            raise ValueError("Draft recovery schema mismatch.")
+        stored_strategy_id = str(
+            session_data.get("flow_strategy_id", "") or ""
+        )
+        if (
+            stored_strategy_id
+            and stored_strategy_id != restored_strategy.strategy_id
+        ):
+            raise ValueError("Draft flow strategy identity mismatch.")
+        session_data["flow_strategy_id"] = restored_strategy.strategy_id
         for key, value in session_data.items():
             st.session_state[key] = value
         st.session_state.active_simulator = simulator
@@ -2613,7 +2575,10 @@ def build_data_quality_records(summary_records: List[Dict[str, Any]]) -> List[Di
 def display_action_label(action: Dict[str, Any], sim: Optional[Simulator] = None) -> str:
     aid = str(action.get("id", ""))
     # In academy pre/post assessment, use neutral labels to avoid leaking the answer.
-    if current_system_mode() == "academy" and sim is not None and getattr(sim, "mode", "") == "exam":
+    if (
+        sim is not None
+        and current_flow_strategy(sim).use_neutral_action_labels
+    ):
         return ACADEMY_EXAM_ACTION_LABELS.get(aid, str(action.get("label", aid)))
     return str(action.get("label", aid))
 
@@ -2670,11 +2635,17 @@ def start_simulation(scenario_path: Path, mode: str, seed: int, participant_id: 
     )
     scenario = randomize_patient_profile(scenario_source)
     sim = Simulator(scenario, mode=mode, seed=seed)
+    strategy = current_flow_strategy(sim)
     meta = scenario.get("scenario", {})
-    mode_name = "training" if mode == "coach" else "exam"
+    mode_name = (
+        "training"
+        if strategy.score_presentation == "live"
+        else "exam"
+    )
     script_name = safe_filename_part(meta.get("script_name") or scenario_path.stem)
     participant = safe_filename_part(participant_id or "anonymous")
     st.session_state.active_simulator = sim
+    st.session_state.flow_strategy_id = strategy.strategy_id
     st.session_state.active_scenario = scenario
     st.session_state.active_scenario_path = str(scenario_path)
     st.session_state.active_script_name = script_name
@@ -2706,7 +2677,12 @@ def start_simulation(scenario_path: Path, mode: str, seed: int, participant_id: 
     st.session_state.pending_academy_post_evaluation = False
     st.session_state.pending_post_evaluation_report = None
     st.session_state.pending_post_evaluation_reason = ""
-    if current_system_mode() == "academy" and st.session_state.get("assessment_phase") == "课后考核":
+    if (
+        strategy.questionnaire_transition_for_phase(
+            st.session_state.get("assessment_phase", "")
+        )
+        == "academy_post_evaluation"
+    ):
         st.session_state.academy_post_evaluation_completed = False
         st.session_state.academy_post_evaluation_time = ""
         st.session_state.sus_score = ""
@@ -2763,7 +2739,8 @@ def _enter_completed_clinical_result(report: Dict[str, Any], why: str) -> None:
     st.session_state.pending_academy_post_evaluation = False
     st.session_state.pending_post_evaluation_report = None
     st.session_state.pending_post_evaluation_reason = ""
-    persist_active_training_draft()
+    if current_flow_strategy().recovery.preserve_completed_result:
+        persist_active_training_draft()
 
 
 def continue_after_clinical_result(report: Dict[str, Any], why: str) -> bool:
@@ -2841,9 +2818,16 @@ def _academy_post_test_fully_completed(report: Optional[Dict[str, Any]], why: st
     behind a real completed pathway, so a learner cannot jump to SUS after only recognition,
     circulation assessment, or another early action.
     """
-    if current_system_mode() != "academy":
-        return False
-    if st.session_state.get("assessment_phase") != "课后考核":
+    strategy = flow_strategy_for_phase(
+        current_system_mode(),
+        st.session_state.get("assessment_phase", ""),
+    )
+    if (
+        strategy.questionnaire_transition_for_phase(
+            st.session_state.get("assessment_phase", "")
+        )
+        != "academy_post_evaluation"
+    ):
         return False
     if st.session_state.get("academy_post_evaluation_completed", False):
         return False
@@ -3094,6 +3078,11 @@ def render_academy_post_evaluation_survey() -> None:
 
 
 def _save_and_end_report(report: Dict[str, Any], why: str) -> None:
+    strategy = current_flow_strategy()
+    phase_strategy = flow_strategy_for_phase(
+        current_system_mode(),
+        st.session_state.get("assessment_phase", ""),
+    )
     ensure_report_completion_id(report)
     if _needs_academy_post_evaluation(report, why):
         if not st.session_state.get("result_saved", False):
@@ -3110,10 +3099,11 @@ def _save_and_end_report(report: Dict[str, Any], why: str) -> None:
         if st.session_state.get("questionnaire_submit_status") != "failed":
             st.session_state.questionnaire_submit_status = "pending"
             st.session_state.questionnaire_submit_error = ""
-        persist_active_training_draft()
+        if phase_strategy.recovery.preserve_pending_questionnaire:
+            persist_active_training_draft()
         return
     if (
-        current_system_mode() == "clinical"
+        strategy.result_page_behavior == "persistent_clinical_result"
         and st.session_state.get("result_saved", False)
         and isinstance(st.session_state.get("last_report"), dict)
     ):
@@ -3129,7 +3119,7 @@ def _save_and_end_report(report: Dict[str, Any], why: str) -> None:
     st.session_state.result_saved = True
     st.session_state.last_report = report
     st.session_state.last_report_paths = (json_path, md_path)
-    if current_system_mode() == "clinical":
+    if strategy.result_page_behavior == "persistent_clinical_result":
         _enter_completed_clinical_result(report, why)
     else:
         _return_to_registration_after_save(report, why)
@@ -3141,10 +3131,19 @@ def _needs_baseline_post_survey(why: str = "") -> bool:
     The performance record is locked first, then prior training/simulation/real-case exposure
     items are collected. This avoids prompt leakage before the first independent attempt.
     """
-    mode = current_system_mode()
     phase = st.session_state.get("assessment_phase", "")
-    first_phase = (mode == "clinical" and phase == "基线评估") or (mode == "academy" and phase == "课前测评")
-    return bool(first_phase and not st.session_state.get("prior_experience_survey_completed", False))
+    strategy = flow_strategy_for_phase(
+        current_system_mode(),
+        phase,
+    )
+    return bool(
+        strategy.questionnaire_transition_for_phase(phase)
+        == "prior_experience_survey"
+        and not st.session_state.get(
+            "prior_experience_survey_completed",
+            False,
+        )
+    )
 
 
 def finalize_if_done() -> None:
@@ -4230,7 +4229,8 @@ def compact_action_label(label: str, max_chars: int = 24) -> str:
 
 def render_top_status(sim: Simulator, changes: Dict[str, Any]) -> None:
     action_count = sum(1 for e in sim.log if e.kind == "action" and e.message != "penalty")
-    if sim.mode == "coach":
+    strategy = current_flow_strategy(sim)
+    if strategy.score_presentation == "live":
         score_text = f"{sim.score}/{sim.max_score}"
         items = [
             ("时间", f"{sim.state.t}s", False),
@@ -4256,7 +4256,7 @@ def render_top_status(sim: Simulator, changes: Dict[str, Any]) -> None:
         f"<div class='status-panel-title'>运行信息</div>"
         f"<div class='top-strip'>{''.join(html_items)}</div>"
         f"<div class='session-line'>"
-        f"模式：{'训练模式' if sim.mode == 'coach' else '考试模式'}｜"
+        f"模式：{strategy.mode_label}｜"
         f"参与者：{html.escape(st.session_state.participant_id or 'anonymous')}｜"
         f"Session：{html.escape(st.session_state.session_id[-13:] if st.session_state.session_id else '')}"
         f"</div>"
@@ -4587,9 +4587,13 @@ def require_app_access() -> bool:
 
 def render_action_history(sim: Simulator) -> None:
     rows = get_action_history_rows(sim)
-    exam_clean = sim.mode != "coach"
+    show_results = current_flow_strategy(sim).show_immediate_feedback
     if not rows:
-        empty_text = "" if exam_clean else "当前尚未执行任何操作。每次点击选项后，操作记录会显示在这里。"
+        empty_text = (
+            "当前尚未执行任何操作。每次点击选项后，操作记录会显示在这里。"
+            if show_results
+            else ""
+        )
         st.markdown(
             "<div class='history-panel'>"
             "<div class='history-title'>已执行操作</div>"
@@ -4600,7 +4604,11 @@ def render_action_history(sim: Simulator) -> None:
         return
     html_rows = []
     for row in rows[-12:]:
-        result_html = "" if exam_clean else f"<div class='history-result'>{html.escape(str(row.get('结果','')))}</div>"
+        result_html = (
+            f"<div class='history-result'>{html.escape(str(row.get('结果','')))}</div>"
+            if show_results
+            else ""
+        )
         html_rows.append(
             "<div class='history-item'>"
             f"<div class='history-time'>{html.escape(str(row.get('时间','')))}</div>"
@@ -4608,7 +4616,7 @@ def render_action_history(sim: Simulator) -> None:
             f"{result_html}"
             "</div>"
         )
-    title = f"已执行操作（{len(rows)}项）" if not exam_clean else "已执行操作"
+    title = f"已执行操作（{len(rows)}项）" if show_results else "已执行操作"
     st.markdown(
         "<div class='history-panel'>"
         f"<div class='history-title'>{html.escape(title)}</div>"
@@ -4880,8 +4888,13 @@ def render_epinephrine_dose_panel(sim: Simulator) -> bool:
     weight = float(getattr(sim.state, "weight_kg", 0) or 0)
     target_mg = round(min(0.01 * weight, 0.3), 3)
     max_single_mg = 0.3
+    strategy = current_flow_strategy(sim)
     title = "再次肌注肾上腺素：请输入本次总剂量" if pending_id == "repeat_epinephrine" else "肌注肾上腺素：请输入本次总剂量"
-    dose_help = "单位为 mg。确认后系统会按情景规则判断剂量是否有效。" if sim.mode == "coach" else "单位为 mg。"
+    dose_help = (
+        "单位为 mg。确认后系统会按情景规则判断剂量是否有效。"
+        if strategy.show_immediate_feedback
+        else "单位为 mg。"
+    )
     st.markdown(
         "<div class='dose-card'>"
         f"<div class='title'>{html.escape(title)}</div>"
@@ -4889,7 +4902,7 @@ def render_epinephrine_dose_panel(sim: Simulator) -> bool:
         "</div>",
         unsafe_allow_html=True,
     )
-    if sim.mode == "coach":
+    if strategy.show_immediate_feedback:
         st.caption(f"训练提示：本例体重 {weight:g} kg；剂量为 0.01 mg/kg，即 {target_mg:g} mg；儿童单次最大 {max_single_mg:g} mg。")
 
     dose_key = f"epi_dose_mg_{pending_id}_{st.session_state.session_id}_{sim.state.t}"
@@ -4905,8 +4918,16 @@ def render_epinephrine_dose_panel(sim: Simulator) -> bool:
     c_ok, c_cancel = st.columns([1, 1], gap="medium")
     if c_ok.button("确认剂量并执行", type="primary", use_container_width=True):
         result = sim.apply_epinephrine_dose(float(dose_mg), action_id=pending_id)
-        st.session_state.last_dose_feedback = str(result.get("message", "")) if sim.mode == "coach" else ""
-        st.session_state.last_dose_feedback_level = str(result.get("status", "")) if sim.mode == "coach" else ""
+        st.session_state.last_dose_feedback = (
+            str(result.get("message", ""))
+            if strategy.show_immediate_feedback
+            else ""
+        )
+        st.session_state.last_dose_feedback_level = (
+            str(result.get("status", ""))
+            if strategy.show_immediate_feedback
+            else ""
+        )
         st.session_state.pending_dose_action_id = ""
         st.session_state.pending_dose_action_label = ""
         sim.tick()
@@ -4928,7 +4949,12 @@ def render_fluid_bolus_panel(sim: Simulator) -> bool:
     weight = float(getattr(sim.state, "weight_kg", 0) or 0)
     min_ml = round(10 * weight, 1)
     max_ml = round(min(20 * weight, 500), 1)
-    fluid_help = "单位为 ml。确认后系统会按体重判断容量是否合理。" if sim.mode == "coach" else "单位为 ml。"
+    strategy = current_flow_strategy(sim)
+    fluid_help = (
+        "单位为 ml。确认后系统会按体重判断容量是否合理。"
+        if strategy.show_immediate_feedback
+        else "单位为 ml。"
+    )
     st.markdown(
         "<div class='dose-card'>"
         "<div class='title'>快速补液：请输入本次晶体液容量</div>"
@@ -4936,7 +4962,7 @@ def render_fluid_bolus_panel(sim: Simulator) -> bool:
         "</div>",
         unsafe_allow_html=True,
     )
-    if sim.mode == "coach":
+    if strategy.show_immediate_feedback:
         st.caption(f"训练提示：本例体重 {weight:g} kg；合理范围 {min_ml:g}–{max_ml:g} ml（10–20 ml/kg，单次最大500 ml）。")
 
     volume_key = f"fluid_volume_ml_{st.session_state.session_id}_{sim.state.t}"
@@ -4952,8 +4978,16 @@ def render_fluid_bolus_panel(sim: Simulator) -> bool:
     c_ok, c_cancel = st.columns([1, 1], gap="medium")
     if c_ok.button("确认容量并执行", type="primary", use_container_width=True):
         result = sim.apply_fluid_bolus_volume(float(volume_ml))
-        st.session_state.last_dose_feedback = str(result.get("message", "")) if sim.mode == "coach" else ""
-        st.session_state.last_dose_feedback_level = str(result.get("status", "")) if sim.mode == "coach" else ""
+        st.session_state.last_dose_feedback = (
+            str(result.get("message", ""))
+            if strategy.show_immediate_feedback
+            else ""
+        )
+        st.session_state.last_dose_feedback_level = (
+            str(result.get("status", ""))
+            if strategy.show_immediate_feedback
+            else ""
+        )
         st.session_state.pending_volume_action_id = ""
         st.session_state.pending_volume_action_label = ""
         sim.tick()
@@ -4976,7 +5010,12 @@ def render_steroid_dose_panel(sim: Simulator) -> bool:
     weight = float(getattr(sim.state, "weight_kg", 0) or 0)
     min_mg = round(1.0 * weight, 1)
     max_mg = round(min(2.0 * weight, 40.0), 1)
-    steroid_help = "单位为 mg。确认后系统会判断使用时机与剂量是否符合标准路径。" if sim.mode == "coach" else "单位为 mg。"
+    strategy = current_flow_strategy(sim)
+    steroid_help = (
+        "单位为 mg。确认后系统会判断使用时机与剂量是否符合标准路径。"
+        if strategy.show_immediate_feedback
+        else "单位为 mg。"
+    )
     st.markdown(
         "<div class='dose-card'>"
         "<div class='title'>糖皮质激素：请输入甲泼尼龙剂量</div>"
@@ -4984,7 +5023,7 @@ def render_steroid_dose_panel(sim: Simulator) -> bool:
         "</div>",
         unsafe_allow_html=True,
     )
-    if sim.mode == "coach":
+    if strategy.show_immediate_feedback:
         st.caption(f"训练提示：本例体重 {weight:g} kg；甲泼尼龙参考范围 {min_mg:g}–{max_mg:g} mg（1–2 mg/kg，单次最大40 mg）。必须在有效快速扩容后使用。")
 
     steroid_key = f"steroid_dose_mg_{st.session_state.session_id}_{sim.state.t}"
@@ -5000,8 +5039,16 @@ def render_steroid_dose_panel(sim: Simulator) -> bool:
     c_ok, c_cancel = st.columns([1, 1], gap="medium")
     if c_ok.button("确认剂量并执行", type="primary", use_container_width=True):
         result = sim.apply_steroid_dose(float(dose_mg))
-        st.session_state.last_dose_feedback = str(result.get("message", "")) if sim.mode == "coach" else ""
-        st.session_state.last_dose_feedback_level = str(result.get("status", "")) if sim.mode == "coach" else ""
+        st.session_state.last_dose_feedback = (
+            str(result.get("message", ""))
+            if strategy.show_immediate_feedback
+            else ""
+        )
+        st.session_state.last_dose_feedback_level = (
+            str(result.get("status", ""))
+            if strategy.show_immediate_feedback
+            else ""
+        )
         st.session_state.pending_steroid_action_id = ""
         st.session_state.pending_steroid_action_label = ""
         sim.tick()
@@ -5101,7 +5148,10 @@ def visible_actions_for_current_state(sim: Simulator) -> List[Dict[str, Any]]:
     visible: List[Dict[str, Any]] = []
     flags = sim.state.flags
     scenario_meta = (sim.scenario or {}).get("scenario", {}) if hasattr(sim, "scenario") else {}
-    is_academy = current_system_mode() == "academy" or scenario_meta.get("target_group") == "nursing_student"
+    is_academy = (
+        current_flow_strategy(sim).system_mode == "academy"
+        or scenario_meta.get("target_group") == "nursing_student"
+    )
     for action in sim.actions:
         aid = action.get("id", "")
         if aid == "repeat_epinephrine" and not flags.get("repeat_epi_indicated", False):
@@ -5131,6 +5181,7 @@ def visible_actions_for_current_state(sim: Simulator) -> List[Dict[str, Any]]:
 def render_simulation() -> None:
     sim: Simulator = st.session_state.active_simulator
     scenario: Dict[str, Any] = st.session_state.active_scenario
+    strategy = current_flow_strategy(sim)
 
     changes = detect_ui_changes(sim)
 
@@ -5159,7 +5210,7 @@ def render_simulation() -> None:
         render_patient_status(sim, scenario, changes)
         render_top_status(sim, changes)
 
-        if sim.mode == "coach":
+        if strategy.use_guided_prompts:
             item = sim.get_guided_prompt_item() if hasattr(sim, "get_guided_prompt_item") else {"text": sim.get_guided_prompt(), "reason": ""}
             prompt = str(item.get("text", ""))
             reason = str(item.get("reason", ""))
@@ -5174,7 +5225,7 @@ def render_simulation() -> None:
                     unsafe_allow_html=True,
                 )
 
-        if sim.mode == "coach":
+        if strategy.show_immediate_feedback:
             with st.expander("完整状态文本", expanded=False):
                 st.code(sim.format_status(), language="text")
 
@@ -5183,12 +5234,15 @@ def render_simulation() -> None:
             st.markdown(
                 f"<div class='action-head'>"
                 f"<div class='action-title'>请选择下一步操作</div>"
-                f"<div class='action-note'>{html.escape('每次操作后自动推进 ' + str(sim.tick_seconds) + 's' if sim.mode == 'coach' else '')}</div>"
+                f"<div class='action-note'>{html.escape('每次操作后自动推进 ' + str(sim.tick_seconds) + 's' if strategy.show_immediate_feedback else '')}</div>"
                 f"</div>",
                 unsafe_allow_html=True,
             )
 
-            if sim.mode == "coach" and st.session_state.get("last_dose_feedback"):
+            if (
+                strategy.show_immediate_feedback
+                and st.session_state.get("last_dose_feedback")
+            ):
                 level = st.session_state.get("last_dose_feedback_level", "")
                 msg = st.session_state.get("last_dose_feedback", "")
                 if level == "valid":
@@ -5262,8 +5316,7 @@ def render_simulation() -> None:
                 finalize_if_done()
                 st.rerun()
 
-            academy_exam_locked = current_system_mode() == "academy" and sim.mode == "exam"
-            if academy_exam_locked:
+            if not strategy.allow_manual_completion:
                 c2.button("考试模式需按流程完成", type="primary", use_container_width=True, disabled=True)
                 c3.caption("学院课前/课后考试模式已锁定：需完成情景核心节点后系统自动结束，避免提前结束或提前进入SUS。")
             else:
@@ -5282,7 +5335,7 @@ def render_simulation() -> None:
                             st.session_state.baseline_stage_completed = True
                         _save_and_end_report(report, "participant_confirmed_rescue_complete")
                     st.rerun()
-                if sim.mode == "coach":
+                if strategy.show_immediate_feedback:
                     c3.caption("可点击确认完成抢救结束当前阶段；未完成标准步骤按0分统计。")
 
 
@@ -5300,7 +5353,21 @@ RESULT_END_REASON_LABELS = {
 def build_result_page_context(report: Dict[str, Any], end_reason: str) -> Dict[str, Any]:
     session_meta = report.get("session", {}) or {}
     mode_code = str(report.get("mode", "") or session_meta.get("workflow_mode", ""))
-    mode_label = {"coach": "训练模式", "exam": "考核模式"}.get(mode_code, mode_code or "未记录")
+    system_mode = str(
+        session_meta.get("system_mode", "")
+        or current_system_mode()
+    )
+    try:
+        strategy = flow_strategy_for_modes(system_mode, mode_code)
+        mode_label = strategy.mode_label
+        result_page_behavior = strategy.result_page_behavior
+    except FlowStrategyError:
+        strategy = None
+        mode_label = {
+            "coach": "训练模式",
+            "exam": "考核模式",
+        }.get(mode_code, mode_code or "未记录")
+        result_page_behavior = ""
     action_labels: Dict[str, str] = {}
     for entry in report.get("log", []) or []:
         if not isinstance(entry, dict) or entry.get("kind") != "action":
@@ -5321,11 +5388,13 @@ def build_result_page_context(report: Dict[str, Any], end_reason: str) -> Dict[s
             "现有反馈": str(award.get("reason", "") or ""),
         })
     return {
-        "system_mode": str(session_meta.get("system_mode", "") or current_system_mode()),
+        "system_mode": system_mode,
         "system_mode_label": str(session_meta.get("system_mode_label", "") or current_system_mode_label()),
         "assessment_phase": str(session_meta.get("assessment_phase", "") or st.session_state.get("assessment_phase", "")),
         "mode_code": mode_code,
         "mode_label": mode_label,
+        "flow_strategy_id": strategy.strategy_id if strategy else "",
+        "result_page_behavior": result_page_behavior,
         "scenario_title": str(report.get("scenario_title", "") or "未记录"),
         "completion_label": RESULT_END_REASON_LABELS.get(end_reason, end_reason or "未记录"),
         "score": report.get("score"),
@@ -5344,7 +5413,10 @@ def render_report() -> None:
         st.session_state.last_report = report
 
     result_context = build_result_page_context(report, st.session_state.end_reason)
-    if result_context["system_mode"] == "clinical":
+    if (
+        result_context["result_page_behavior"]
+        == "persistent_clinical_result"
+    ):
         st.markdown("### 临床模式｜病例结果")
         st.table([
             {"项目": "当前模式", "内容": result_context["system_mode_label"]},
@@ -5410,7 +5482,10 @@ def render_report() -> None:
             use_container_width=True,
         )
 
-    if result_context["system_mode"] == "clinical":
+    if (
+        result_context["result_page_behavior"]
+        == "persistent_clinical_result"
+    ):
         scored_actions = result_context["scored_actions"]
         st.markdown("**关键操作与现有反馈**")
         if scored_actions:
@@ -5422,7 +5497,10 @@ def render_report() -> None:
     if st.session_state.show_raw_log:
         st.json(report.get("log", []))
 
-    if result_context["system_mode"] == "clinical":
+    if (
+        result_context["result_page_behavior"]
+        == "persistent_clinical_result"
+    ):
         st.divider()
         st.markdown("**后续流程**")
         st.caption("本次临床结果已经保存。当前临床流程未配置独立SUS或教学体验问卷，可继续返回登记选择下一阶段，也可重新开始本阶段。")
