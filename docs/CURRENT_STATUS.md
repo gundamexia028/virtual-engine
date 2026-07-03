@@ -4,9 +4,9 @@
 
 更新时间：2026-07-01
 
-当前阶段：正式开发目录已建立，敏感信息终检和139项回归已通过，本地Git已初始化
+当前阶段：模块化重构第1阶段“行为契约与黄金基线”已完成，运行时逻辑未改变
 
-状态性质：`app/`为正式Git开发目录；`working/`保留基线、迁移前快照、报告和回滚资料；生产Supabase、RLS和正式试用仍未验证
+状态性质：`app/`已建立场景结构契约、12条黄金行为路径和175项自动回归基线；`working/`保留基线、迁移前快照、报告和回滚资料；生产Supabase、RLS和正式试用仍未验证
 
 本文件依据：
 
@@ -37,6 +37,8 @@
 * `working/V1.3.8_ORG_CODE_HASH_FIX_TEST.log`
 * `working/V1.3.8_GIT_INITIALIZATION_REPORT.md`
 * `source_packages/PACKAGE_REGISTER.md`
+* `docs/MODULAR_ARCHITECTURE_PLAN.md`
+* `docs/SCENARIO_BEHAVIOR_CONTRACT.md`
 
 ## 2. 当前工作区
 
@@ -483,6 +485,35 @@
 * `working/V1.3.8_GIT_INITIALIZATION_REPORT.md`
 * `working/V1.3.8_APP_GIT_BASELINE_TEST.log`
 
+### 4.22 模块化重构第1阶段：行为契约与黄金基线
+
+已完成：
+
+* 建立模块化架构评估和6阶段最小风险重构顺序；
+* 建立场景结构契约，覆盖4份现有场景脚本；
+* 当前脚本确认为`baseline + actions + dynamics + end_conditions`状态机，不虚构为显式节点图；
+* 校验4个场景ID、4个隐式起始状态、82个动作选项、44条动态规则和4组结束条件；
+* 为未来显式节点扩展建立节点ID、选项ID、目标引用、可达性、终止节点和允许循环校验；
+* 建立临床训练、临床考核、学院训练、学院考核4类流程的12条黄金路径；
+* 每类流程覆盖理想路径、典型错误路径和关键分支路径；
+* 黄金快照固定节点/动作序列、选择、评分维度、最终生命体征、完成状态、关键反馈和结果页核心字段；
+* 黄金快照排除时间戳、随机ID、会话标识、本机路径和Secrets；
+* 新增20项场景结构契约测试和16项黄金行为测试，36/36通过；
+* 原有139项测试继续通过，当前合计175/175；
+* `streamlit_app.py`、引擎、病例、评分、页面、存储和权限运行逻辑均未修改；
+* 4份场景文件SHA-256保持不变；
+* 测试临时Secrets已清理，无JSONL、日志或业务数据残留；
+* 未连接Supabase或其他外部业务服务；
+* 只读基线28/28文件大小和SHA-256仍与登记一致。
+
+证据：
+
+* `docs/MODULAR_ARCHITECTURE_PLAN.md`
+* `docs/SCENARIO_BEHAVIOR_CONTRACT.md`
+* `app/tests/scenario_contract_tests.py`
+* `app/tests/golden_behavior_tests.py`
+* `app/tests/golden/v1_3_8_behavior_baseline.json`
+
 ## 5. 已确认技术事实
 
 以下内容依据只读审计、环境审计、依赖安装、配置建立和本地冒烟测试报告。
@@ -501,7 +532,7 @@
 | Streamlit版本 | 已确认 | 1.58.0 | 依赖安装报告第10节；冒烟报告第3节 |
 | Supabase Python客户端版本 | 已确认 | 2.31.0；仅安装SDK，本次未连接Supabase | 依赖安装报告第10节；冒烟报告第13节 |
 | Python 3.13兼容性 | 部分确认 | 已通过依赖安装、Streamlit启动、HTTP健康检查、核心业务、恢复、结果页和学院问卷本地保存测试；生产环境和长时间运行未验证 | 依赖安装报告第13节；本次修复报告第8节 |
-| 测试现状 | 部分确认 | 9个测试脚本共139项自动测试通过；原32项单位隔离场景继续全部通过；长时间运行仍未完成 | 管理码修复报告第7节 |
+| 测试现状 | 部分确认 | 11个测试脚本共175项自动测试通过，其中原有139项全部继续通过；新增20项结构契约和16项黄金行为测试；长时间运行仍未完成 | `docs/SCENARIO_BEHAVIOR_CONTRACT.md`；`app/tests/scenario_contract_tests.py`；`app/tests/golden_behavior_tests.py` |
 | 当前数据保存方式 | 部分确认 | 默认保存在 `st.session_state`、本地报告、训练JSONL和独立问卷JSONL；历史读取时按完成标识合并；如 Supabase secrets 存在仍会使用既有数据库候选路径 | 审计报告第9节、第19节；本次修复报告第3-6节 |
 | 是否存在真正数据库 | 部分确认 | 基线包内未发现数据库文件；外部真实数据库是否存在未确认 | 审计报告第19节 |
 | 是否已连接 Supabase | 未发现 | 基线代码未内置真实 Supabase 连接配置；本次未连接外部服务 | 审计报告第10节、第19节 |
@@ -609,7 +640,7 @@ README当前标题和版本定位均为V1.3.8。
 | 中 | Supabase SDK 调用未见显式超时设置 | 审计报告 QA-010 | 未处理 |
 | 已修复 | 运行时写 `config/org_access_codes.json` | 审计报告 R-011、QA-011；管理码修复报告第5节 | 后台写入路径已移除；配置由本机CLI生成后安全注入 |
 | 中 | README 与实际代码不一致 | 审计报告 QA-012 | 未处理 |
-| 中 | 测试覆盖不足 | 审计报告 R-012、QA-013；管理码修复报告 | 当前139项自动测试通过，原32项单位隔离场景全部通过；真实WebSocket模糊测试和长时间运行仍未覆盖 |
+| 中 | 测试覆盖不足 | 审计报告 R-012、QA-013；模块化行为契约 | 当前175项自动测试通过，已增加4场景结构契约和12条黄金路径；真实WebSocket模糊测试和长时间运行仍未覆盖 |
 | 已修复 | 页面刷新后进行中的训练状态丢失 | 全流程验证报告 FWT-001；刷新恢复报告 | 四类流程专项测试通过；临床训练localhost真实刷新恢复通过 |
 | 已修复 | 临床正常完成后结果页未进入主流程 | 全流程验证报告 FWT-002；临床结果页修复报告 | 临床训练和考核均进入结果页，完成态刷新和重复结算测试通过 |
 | 已修复 | 问卷保存失败缺少状态恢复保护 | 全流程验证报告 FWT-003；本次修复报告 | 训练结果先保存；问卷草稿、失败状态和随机提交标识可恢复并安全重试 |
@@ -672,8 +703,10 @@ README当前标题和版本定位均为V1.3.8。
 * `tests/academy_questionnaire_idempotency_tests.py`：10项；
 * `tests/organization_authorization_tests.py`：32项。
 * `tests/org_credential_security_tests.py`：20项。
+* `tests/scenario_contract_tests.py`：20项。
+* `tests/golden_behavior_tests.py`：16项。
 
-最终自动测试139/139通过。
+最终自动测试175/175通过，其中原有139项继续139/139通过，新增36项继续36/36通过。
 
 已验证：
 
@@ -692,6 +725,9 @@ README当前标题和版本定位均为V1.3.8。
 * 明文单位管理码、旧无盐SHA-256、缺失凭据参数和身份不匹配均安全拒绝；
 * CLI的JSON与TOML输出不含原始管理码；
 * 无Supabase本地降级。
+* 4份场景结构、82个动作选项、44条动态规则和结束条件契约；
+* 临床/学院、训练/考核4类流程共12条黄金行为路径；
+* 黄金快照不含时间戳、随机ID、会话标识、本机路径或Secrets。
 
 仍未完成：
 
@@ -699,7 +735,7 @@ README当前标题和版本定位均为V1.3.8。
 * 高负载并发、短暂断线、浏览器误返回和长时间运行；
 * Supabase测试环境、RLS和迁移验证。
 
-独立环境未安装`pytest`，当前按九个测试脚本分别运行。不得在未评估依赖方案前擅自安装。
+独立环境未安装`pytest`，当前按十一个测试脚本分别运行。不得在未评估依赖方案前擅自安装。
 
 证据来源：`working/V1.3.8_FULL_WORKFLOW_TEST_REPORT.md`、`working/V1.3.8_SESSION_RECOVERY_REPORT.md`、`working/V1.3.8_CLINICAL_RESULT_PAGE_FIX_REPORT.md`、`working/V1.3.8_ACADEMY_QUESTIONNAIRE_IDEMPOTENCY_REPORT.md`、`working/V1.3.8_ORGANIZATION_AUTHORIZATION_FIX_REPORT.md`、`working/V1.3.8_ORG_CODE_HASH_FIX_REPORT.md`。
 
@@ -722,17 +758,15 @@ README当前标题和版本定位均为V1.3.8。
 当前状态：
 
 * 本地Git已初始化；
-* 当前分支为`main`；
+* `main`和`develop`分支已建立；
+* 当前模块化工作分支为`feature/modularization-stage-1`；
 * 首次安全基线提交使用说明：`chore: establish secure virtual engine baseline`；
-* 未连接GitHub；
-* 未配置远程仓库；
-* 未建立分支策略；
-* 未建立Pull Request流程；
-* 未配置GitHub Actions；
-* 未配置自动测试；
+* 已配置私有GitHub远程仓库`origin`；
+* 已建立从功能分支到`develop`、从`develop`到`main`的Pull Request流程；
+* 已配置Python 3.13 GitHub Actions自动测试；
 * 未配置自动部署。
 
-正式目录、忽略规则、敏感信息终检和139项测试已经建立本地安全基线，但尚未授权或配置任何远程仓库。
+正式目录、忽略规则、敏感信息终检、175项本地测试和自动测试工作流已经建立开发安全基线。
 
 证据来源：`working/V1.3.8_GIT_INITIALIZATION_REPORT.md`。
 
@@ -759,8 +793,8 @@ README当前标题和版本定位均为V1.3.8。
 在完成其余P0安全事项、完整测试和必要动态验证前，不得：
 
 * 直接修改只读基线；
-* 添加未经用户授权的远程仓库；
-* 推送到GitHub或其他远程仓库；
+* 直接向`main`推送功能修改；
+* 绕过Pull Request审查合并模块化重构；
 * 连接生产 Supabase；
 * 部署生产环境；
 * 使用默认管理员密码；
@@ -776,17 +810,17 @@ README当前标题和版本定位均为V1.3.8。
 
 下一阶段为：
 
-维护`app/`本地Git开发基线，并继续处理生产接入前事项和历史机构ID迁移方案。
+在第1阶段Pull Request审查通过后，执行模块化重构第2阶段“情景目录、加载器和流程策略拆分”。
 
 建议顺序：
 
-1. 每次提交前复用敏感信息扫描和139项回归测试；
-2. 制定既有无`organization_id`记录的受控映射和迁移方案；
-3. 设计Supabase表字段、服务端RLS、密钥最小权限和回滚方案；
-4. 在独立测试Supabase中验证机构ID隔离，禁止直接连接生产环境；
-5. 完成真实加盐管理码页面登录闭环和长时间运行验证；
-6. 用户另行授权后再评估私有GitHub仓库、分支保护和自动测试；
-7. 生产接入条件未满足前不得部署。
+1. 审查结构契约、行为契约和12条黄金快照；
+2. 每次提交前运行175项回归并核对4份场景哈希；
+3. 第2阶段先建立情景manifest和纯Python加载器；
+4. 使用`scenario_id + phase`定位脚本并保持4份旧脚本兼容；
+5. 将模式、阶段和情景元数据移出UI入口文件；
+6. 不在第2阶段修改`Simulator`医学逻辑、评分、病例或结果格式；
+7. 生产接入条件未满足前不得连接生产Supabase或部署。
 
 ## 12. 当前结论
 
@@ -807,7 +841,9 @@ README当前标题和版本定位均为V1.3.8。
 * Python 3.13首次运行验证；
 * 默认凭据安全修复；
 * V1.3.8版本语义审计与最小统一；
-* 139项自动测试；
+* 175项自动测试，其中原有139项继续通过；
+* 模块化架构评估与6阶段重构计划；
+* 场景行为契约、20项结构校验和12条黄金行为路径；
 * 临床和学院核心业务全流程验证；
 * 临床、学院、训练和考核四类流程的刷新恢复专项验证；
 * 临床训练localhost真实刷新恢复验证；
@@ -820,7 +856,7 @@ README当前标题和版本定位均为V1.3.8。
 * 身份绑定PBKDF2验证与本地安全生成工具；
 * 正式Git开发目录`app/`及根目录安全忽略规则；
 * 提交前敏感信息终检；
-* `app/`正式目录139/139回归；
+* `app/`正式目录175/175回归；
 * 本地Git初始化和`main`分支；
 * 修复后原32项隔离场景全部通过；
 * localhost登记、双模式、错误分支和管理端交互；
@@ -839,13 +875,14 @@ README当前标题和版本定位均为V1.3.8。
 
 当前项目技术实现状态应表述为：
 
-`正式Git开发目录app/已建立，本地main分支、敏感信息终检和139项自动测试均已完成；单位凭据使用身份绑定PBKDF2，明文和旧无盐SHA-256配置均被拒绝。未配置远程仓库，生产Supabase、RLS、历史机构ID迁移和正式试用仍未验证，因此当前仍不具备生产接入或生产部署条件。`
+`正式Git开发目录app/已建立，模块化重构第1阶段的场景结构契约、行为契约、12条黄金路径和175项自动测试均已完成；运行时逻辑、病例、评分、页面、存储和权限实现未改变。生产Supabase、RLS、历史机构ID迁移和正式试用仍未验证，因此当前仍不具备生产接入或生产部署条件。`
 
 当前正式目录相对只读基线的计划内业务变化：
 
 * 修改：`streamlit_app.py`、`README.md`、`peds_anaphylaxis_sim/__init__.py`、`peds_anaphylaxis_sim/engine.py`；
 * 新增安全模块与工具：`peds_anaphylaxis_sim/org_credentials.py`、`tools/generate_org_admin_credential.py`；
 * 新增测试：`tests/credential_security_tests.py`、`tests/version_consistency_tests.py`、`tests/full_workflow_validation.py`、`tests/session_recovery_tests.py`、`tests/clinical_result_page_tests.py`、`tests/academy_questionnaire_idempotency_tests.py`、`tests/organization_authorization_tests.py`、`tests/org_credential_security_tests.py`；
+* 新增模块化基线测试：`tests/scenario_contract_tests.py`、`tests/golden_behavior_tests.py`和`tests/golden/v1_3_8_behavior_baseline.json`；
 * 病例JSON、评分标准、问卷题目和版本号未因本次管理码修复改变；
 * 只读基线28个文件的大小和SHA-256仍与登记一致；
 * `.pyc`和`__pycache__`属于运行缓存，已由根目录`.gitignore`排除；
