@@ -8,5 +8,6 @@ config/org_access_codes.json
 .DS_Store
 runs/
 runs_web/
+competition_runtime/
 .runtime/
 *.log

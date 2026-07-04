@@ -2,11 +2,11 @@
 
 ## 1. 状态更新时间
 
-更新时间：2026-07-03
+更新时间：2026-07-04
 
-当前阶段：模块化重构第3阶段“流程策略拆分”已完成，等待Pull Request审查
+当前阶段：V1.3.8比赛评审专用模式与学院连续教学流程候选已完成本地开发、自动回归和主流程浏览器验收，等待本轮最小页面回归与Pull Request审查
 
-状态性质：`app/`已建立4情景统一注册表、统一流程策略接口、12条黄金行为路径和224项自动回归基线；4份情景JSON及其医学、评分、生命体征、反馈和结束行为未改变；生产Supabase、RLS和正式试用仍未验证
+状态性质：在原224项模块化第3阶段基线上增加32项评审模式测试和40项候选稳定性测试，当前296/296通过；competition与production账号、权限和数据读写已代码级隔离；学院合规给药配合、错误后恢复、统一时间显示、考试自动结束、训练手动确认、重启确认、幂等与三阶段连续流程已增加保护；competition学院三阶段、只读管理端及production双入口主流程已完成人工验收；4份情景JSON、医学、评分、时间窗、生命体征、12条黄金路径和黄金快照未改变；本轮最小页面回归、生产Supabase、RLS和正式部署仍未验证
 
 本文件依据：
 
@@ -586,7 +586,7 @@
 | Streamlit版本 | 已确认 | 1.58.0 | 依赖安装报告第10节；冒烟报告第3节 |
 | Supabase Python客户端版本 | 已确认 | 2.31.0；仅安装SDK，本次未连接Supabase | 依赖安装报告第10节；冒烟报告第13节 |
 | Python 3.13兼容性 | 部分确认 | 已通过依赖安装、Streamlit启动、HTTP健康检查、核心业务、恢复、结果页和学院问卷本地保存测试；生产环境和长时间运行未验证 | 依赖安装报告第13节；本次修复报告第8节 |
-| 测试现状 | 部分确认 | 13个测试脚本共224项自动测试通过；包含20项结构契约、16项黄金行为、22项加载器和27项流程策略测试；长时间运行仍未完成 | `docs/SCENARIO_BEHAVIOR_CONTRACT.md`；`app/tests/scenario_contract_tests.py`；`app/tests/golden_behavior_tests.py`；`app/tests/scenario_loader_tests.py`；`app/tests/flow_strategy_tests.py` |
+| 测试现状 | 部分确认 | 15个测试脚本共296项自动测试通过；包含原224项模块化基线、32项competition专项测试和40项候选稳定性测试；competition学院三阶段、评审只读管理端及production双入口已完成人工主流程验收，本轮页面微调仍需最小回归 | `docs/SCENARIO_BEHAVIOR_CONTRACT.md`；`app/tests/scenario_contract_tests.py`；`app/tests/golden_behavior_tests.py`；`app/tests/scenario_loader_tests.py`；`app/tests/flow_strategy_tests.py`；`app/tests/competition_mode_tests.py`；`app/tests/competition_stability_tests.py` |
 | 当前数据保存方式 | 部分确认 | 默认保存在 `st.session_state`、本地报告、训练JSONL和独立问卷JSONL；历史读取时按完成标识合并；如 Supabase secrets 存在仍会使用既有数据库候选路径 | 审计报告第9节、第19节；本次修复报告第3-6节 |
 | 是否存在真正数据库 | 部分确认 | 基线包内未发现数据库文件；外部真实数据库是否存在未确认 | 审计报告第19节 |
 | 是否已连接 Supabase | 未发现 | 基线代码未内置真实 Supabase 连接配置；本次未连接外部服务 | 审计报告第10节、第19节 |
@@ -746,7 +746,7 @@ README当前标题和版本定位均为V1.3.8。
 
 ### 9.3 测试
 
-当前测试文件：
+当前测试文件共15个：
 
 * `tests/smoke_tests.py`：6项；
 * `tests/credential_security_tests.py`：20项；
@@ -755,12 +755,16 @@ README当前标题和版本定位均为V1.3.8。
 * `tests/session_recovery_tests.py`：13项；
 * `tests/clinical_result_page_tests.py`：15项；
 * `tests/academy_questionnaire_idempotency_tests.py`：10项；
-* `tests/organization_authorization_tests.py`：32项。
-* `tests/org_credential_security_tests.py`：20项。
-* `tests/scenario_contract_tests.py`：20项。
-* `tests/golden_behavior_tests.py`：16项。
+* `tests/organization_authorization_tests.py`：32项；
+* `tests/org_credential_security_tests.py`：20项；
+* `tests/scenario_contract_tests.py`：20项；
+* `tests/golden_behavior_tests.py`：16项；
+* `tests/scenario_loader_tests.py`：22项；
+* `tests/flow_strategy_tests.py`：27项；
+* `tests/competition_mode_tests.py`：32项。
+* `tests/competition_stability_tests.py`：40项。
 
-最终自动测试175/175通过，其中原有139项继续139/139通过，新增36项继续36/36通过。
+当前最终自动测试296/296通过。测试结构为：原有139项 + 第1阶段36项 + 第2阶段22项 + 第3阶段27项 + 评审模式32项 + 候选稳定性40项 = 296项。历史阶段中的175/175、197/197、224/224、256/256与288/288结果保留在对应阶段记录中，不代表当前最终基线。
 
 已验证：
 
@@ -782,30 +786,36 @@ README当前标题和版本定位均为V1.3.8。
 * 4份场景结构、82个动作选项、44条动态规则和结束条件契约；
 * 临床/学院、训练/考核4类流程共12条黄金行为路径；
 * 黄金快照不含时间戳、随机ID、会话标识、本机路径或Secrets。
+* 学院三阶段无需选择“独立完成急救注射”即可完成，等待老师和其他非终末错误后仍可纠正；
+* 所有参与者可见模拟时间统一为`mm:ss`，重启、动作、跳转、完成和问卷具有UI幂等保护；
+* 三阶段同一参与者、独立会话、独立完成页、结果页、问卷和全流程完成顺序；
+* 模拟训练核心节点完成后等待学习者二次确认，继续操作不丢失状态，确认结束及刷新不重复保存；
+* 训练完成页不显示内部空值，三阶段标题、问卷按钮和全流程侧栏使用与页面状态一致的中文；
+* competition退出清理授权，production/competition入口、权限和数据源互不覆盖。
 
 仍未完成：
 
-* SUS和教学体验问卷完整人工页面体验验证；
+* SUS和教学体验问卷本轮按钮文案最小人工回归；
+* production问卷是否取消初始3分默认值仍需产品/研究设计确认；
 * 高负载并发、短暂断线、浏览器误返回和长时间运行；
 * Supabase测试环境、RLS和迁移验证。
 
-独立环境未安装`pytest`，当前按十一个测试脚本分别运行。不得在未评估依赖方案前擅自安装。
+当前按15个测试脚本分别运行；其中`unittest`共290项，另含6项冒烟检查，合计296项。仓库沿用既有`unittest`与轻量冒烟结构，不依赖`pytest`。统一入口为`scripts/verify_competition_candidate.py`。
 
 证据来源：`working/V1.3.8_FULL_WORKFLOW_TEST_REPORT.md`、`working/V1.3.8_SESSION_RECOVERY_REPORT.md`、`working/V1.3.8_CLINICAL_RESULT_PAGE_FIX_REPORT.md`、`working/V1.3.8_ACADEMY_QUESTIONNAIRE_IDEMPOTENCY_REPORT.md`、`working/V1.3.8_ORGANIZATION_AUTHORIZATION_FIX_REPORT.md`、`working/V1.3.8_ORG_CODE_HASH_FIX_REPORT.md`。
 
 ### 9.4 医学资料
 
-尚未将正式医学指南、专家共识及其他依据放入：
+已在`references/`建立规范引文与医学依据索引，当前主要依据为：
 
-`references/`
+《中国康复医学会变态反应性疾病康复专业委员会等. 严重过敏反应诊断和临床管理专家共识[J]. 中华预防医学杂志, 2025, 59(6): 749-765. DOI:10.3760/cma.j.cn112150-20250109-00024.》
 
-尚未完成：
+已完成：
 
-`references/医学依据索引.md`
+* `references/README.md`：收录医学依据使用边界、版权与原创性边界；
+* `references/医学依据索引.md`：建立诊断、去除诱因、呼救、肾上腺素、给氧、液体复苏、监测、复评、二线药物等规则与情景文件、动作ID、动态规则和代码位置的可追溯关系。
 
-当前尚未建立医学规则与系统节点之间的可追溯关系。
-
-审计报告仅记录了医学剂量和关键流程所在位置，未判断医学正确性。
+说明：该索引用于证明规则来源和教学转化路径，不等同于临床诊疗指南；系统仍仅用于护理教学、培训与科研可行性验证。
 
 ### 9.5 Git与远程仓库
 
@@ -813,14 +823,14 @@ README当前标题和版本定位均为V1.3.8。
 
 * 本地Git已初始化；
 * `main`和`develop`分支已建立；
-* 当前模块化工作分支为`feature/modularization-stage-1`；
+* 当前模块化工作分支为`feature/modularization-stage-3`；
 * 首次安全基线提交使用说明：`chore: establish secure virtual engine baseline`；
 * 已配置私有GitHub远程仓库`origin`；
 * 已建立从功能分支到`develop`、从`develop`到`main`的Pull Request流程；
 * 已配置Python 3.13 GitHub Actions自动测试；
 * 未配置自动部署。
 
-正式目录、忽略规则、敏感信息终检、175项本地测试和自动测试工作流已经建立开发安全基线。
+首次Git安全基线以175项测试建立；模块化第3阶段扩展至224项，评审模式候选先扩展至256项，候选稳定性收口先扩展至288项，本轮最终页面收口扩展至296项，并保留既有开发安全基线。
 
 证据来源：`working/V1.3.8_GIT_INITIALIZATION_REPORT.md`。
 
@@ -869,7 +879,7 @@ README当前标题和版本定位均为V1.3.8。
 建议顺序：
 
 1. 审查4个流程策略、6个阶段映射和27项专项测试；
-2. 每次提交前运行224项回归并核对4份情景哈希和12条黄金快照；
+2. 每次提交前运行296项回归并核对4份情景哈希和12条黄金快照；
 3. 建立应用流程协调器；
 4. 将开始、完成、结果页、返回和重置转为显式状态转换；
 5. 将草稿文件操作与Streamlit query/session适配分开；
@@ -895,7 +905,7 @@ README当前标题和版本定位均为V1.3.8。
 * Python 3.13首次运行验证；
 * 默认凭据安全修复；
 * V1.3.8版本语义审计与最小统一；
-* 224项自动测试，其中第2阶段新增22项加载器测试，第3阶段新增27项流程策略测试；
+* 296项自动测试，其中第2阶段新增22项加载器测试、第3阶段新增27项流程策略测试、评审模式新增32项、候选稳定性累计新增40项；
 * 模块化架构评估与6阶段重构计划；
 * 场景行为契约、20项结构校验和12条黄金行为路径；
 * 模块化第2阶段统一情景注册表、纯Python加载器和阶段路由；
@@ -912,7 +922,7 @@ README当前标题和版本定位均为V1.3.8。
 * 身份绑定PBKDF2验证与本地安全生成工具；
 * 正式Git开发目录`app/`及根目录安全忽略规则；
 * 提交前敏感信息终检；
-* `app/`正式目录175/175回归；
+* `app/`正式目录当前296/296回归；
 * 本地Git初始化和`main`分支；
 * 修复后原32项隔离场景全部通过；
 * localhost登记、双模式、错误分支和管理端交互；
@@ -931,7 +941,7 @@ README当前标题和版本定位均为V1.3.8。
 
 当前项目技术实现状态应表述为：
 
-`正式Git开发目录app/已建立，模块化重构第3阶段已完成四类流程策略拆分，4份情景、12条黄金路径、82个动作、44条动态规则和224项自动测试均保持通过；病例、医学内容、评分、生命体征、反馈、结束结果、页面视觉、存储和权限行为未改变。生产Supabase、RLS、历史机构ID迁移和正式试用仍未验证，因此当前仍不具备生产接入或生产部署条件。`
+`正式Git开发目录app/已在V1.3.8同一程序内完成competition评审候选稳定性收口：统一APP_MODE、独立评审账号、只读虚拟后台、互斥存储、学院合规给药配合、可恢复错误分支、统一时间、连续三阶段、训练手动确认、重启确认和幂等保护已实现；4份情景、12条黄金路径、82个原动作、44条动态规则和296项自动测试均保持通过。病例、医学内容、评分、时间窗、生命体征和黄金快照未改变。production问卷默认值、生产Supabase、RLS、历史机构ID迁移和正式部署仍未验证。`
 
 当前正式目录相对只读基线的计划内业务变化：
 

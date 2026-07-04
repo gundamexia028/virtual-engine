@@ -66,6 +66,7 @@ from types import SimpleNamespace
 root = Path(sys.argv[1])
 sys.path.insert(0, str(root))
 import streamlit_app as app
+app.APP_MODE = "production"
 
 class State(dict):
     def __getattr__(self, key):
@@ -92,6 +93,7 @@ from types import SimpleNamespace
 root = Path(sys.argv[1])
 sys.path.insert(0, str(root))
 import streamlit_app as app
+app.APP_MODE = "production"
 
 class State(dict):
     def __getattr__(self, key):
@@ -275,7 +277,8 @@ class AcademyQuestionnaireIdempotencyTests(unittest.TestCase):
         merged = app.load_full_reports_local(app.create_platform_admin_context())
         self.assertEqual(len(merged), 1)
         self.assertTrue(merged[0]["academy_post_evaluation"]["completed"])
-        self.assertFalse(fake.session_state.profile_completed)
+        self.assertTrue(fake.session_state.profile_completed)
+        self.assertEqual(fake.session_state.academy_flow_page, "flow_complete")
 
     def test_duplicate_questionnaire_retry_is_idempotent(self):
         completion_id = "a" * 64
