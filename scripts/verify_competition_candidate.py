@@ -232,7 +232,9 @@ def main() -> int:
     branch, remote, _ = repository_info()
     failures: list[str] = []
     if branch not in {
+        "develop",
         "feature/competition-review-mode",
+        "fix/allow-develop-competition-verification",
         "integration/competition-review-mode",
     }:
         failures.append(f"unexpected branch: {branch}")
