@@ -23,6 +23,7 @@ releases/
 **/.runtime/
 **/runs/
 **/runs_web/
+**/competition_runtime/
 **/*.jsonl
 **/*.sqlite
 **/*.sqlite3
@@ -40,3 +41,7 @@ Desktop.ini
 .idea/
 .vscode/
 
+
+# Only reviewed, purely synthetic competition demo fixtures are versioned.
+!app/demo_data/
+!app/demo_data/*.jsonl

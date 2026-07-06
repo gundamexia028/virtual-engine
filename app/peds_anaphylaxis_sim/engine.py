@@ -31,9 +31,11 @@ from typing import Any, Dict, List, Optional, Tuple
 try:
     from .scenario_loader import load_scenario_file
     from .flow_strategies import flow_strategy_for_scenario
+    from .time_format import format_elapsed_time, format_timeline_value
 except ImportError:  # pragma: no cover - direct engine.py compatibility
     from scenario_loader import load_scenario_file  # type: ignore
     from flow_strategies import flow_strategy_for_scenario  # type: ignore
+    from time_format import format_elapsed_time, format_timeline_value  # type: ignore
 
 
 def clamp(x: float, lo: float, hi: float) -> float:
@@ -650,7 +652,7 @@ class Simulator:
         )
         prompt_line = f"当前提示：{prompt}\n" if prompt else ""
         return (
-            f"时间：{self.state.t:>4}s\n"
+            f"时间：{format_elapsed_time(self.state.t)}\n"
             + prompt_line
             + self._format_vitals_line()
             + f"当前临床表现：{self._clinical_symptom_text()}\n"
@@ -2405,7 +2407,7 @@ def run_interactive(sim: Simulator) -> Dict[str, Any]:
 
         for i, a in enumerate(sim.actions, start=1):
             print(f"{i:>2}. {a['label']}")
-        print(f"{'T':>2}. 时间流逝 {sim.tick_seconds}s")
+        print(f"{'T':>2}. 时间推进 {format_elapsed_time(sim.tick_seconds)}")
         if sim.flow_strategy.allow_cli_manual_completion:
             print(f"{'Q':>2}. 结束并生成报告")
 
@@ -2475,7 +2477,7 @@ def save_report(report: Dict[str, Any], out_dir: str) -> Tuple[str, str]:
     lines = []
     lines.append(f"# 模拟复盘报告：{report['scenario_title']}")
     lines.append("")
-    lines.append(f"- 结束时间：{report['end_time_seconds']}s")
+    lines.append(f"- 结束时间：{format_elapsed_time(report['end_time_seconds'])}")
     lines.append(f"- 最终分级：{report['final_grade']}")
     lines.append(f"- 得分：{report['score']}/{report['max_score']}（raw {report['raw_score']}，penalties记录但不扣主分：{report['penalties']}）")
     lines.append("")
@@ -2487,7 +2489,7 @@ def save_report(report: Dict[str, Any], out_dir: str) -> Tuple[str, str]:
 
     lines.append("## 关键时间轴")
     for k, v in report["key_timeline"].items():
-        lines.append(f"- {k}: {v}")
+        lines.append(f"- {k}: {format_timeline_value(k, v)}")
     lines.append("")
 
     v_display = report.get("final_vitals_display")
