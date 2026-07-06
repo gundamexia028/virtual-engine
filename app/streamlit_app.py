@@ -47,6 +47,71 @@ from typing import Dict, Any, List, Set, Optional, Tuple
 
 import streamlit as st
 
+from academy_interactions import (
+    ACADEMY_ASSISTED_MEDICATION_ACTION_ID,
+    add_assisted_medication_choice,
+    apply_academy_action,
+)
+from academy_flow import (
+    academy_completion_page_title,
+    academy_flow_page_allowed,
+    academy_sidebar_status,
+    academy_training_ready_for_manual_completion,
+    completion_page_for_phase,
+    latest_allowed_academy_page,
+    next_academy_phase,
+    questionnaire_submit_button_label,
+    score_snapshot,
+    should_auto_finalize_academy_phase,
+    stage_report_key,
+    training_completion_status_text,
+)
+from runtime_config import (
+    APP_MODE_COMPETITION,
+    APP_MODE_PRODUCTION,
+    RuntimeConfigurationError,
+    competition_credentials,
+    deployment_setting,
+    resolve_app_mode,
+)
+from storage_adapters import StorageAdapter, build_storage_adapter
+from ui_labels import (
+    academy_action_short_label,
+    academy_scenario_display_name,
+    format_elapsed_time,
+    format_timeline_value,
+    format_time_progress,
+)
+
+
+def _deployment_setting(name: str, default: str = "") -> str:
+    """Read deployment settings using secrets, then environment, then default."""
+    try:
+        secrets_source = st.secrets  # type: ignore[attr-defined]
+    except Exception:
+        secrets_source = None
+    return deployment_setting(
+        name,
+        secrets=secrets_source,
+        environ=os.environ,
+        default=default,
+    )
+
+
+try:
+    APP_MODE = resolve_app_mode(
+        secrets=getattr(st, "secrets", None),
+        environ=os.environ,
+    )
+    APP_MODE_CONFIGURATION_ERROR = ""
+except RuntimeConfigurationError:
+    APP_MODE = APP_MODE_PRODUCTION
+    APP_MODE_CONFIGURATION_ERROR = "APP_MODE配置无效，只允许production或competition。"
+
+
+def is_competition_mode() -> bool:
+    return APP_MODE == APP_MODE_COMPETITION
+
 from peds_anaphylaxis_sim import SYSTEM_VERSION
 from peds_anaphylaxis_sim.engine import Simulator, save_report
 from peds_anaphylaxis_sim import org_credentials
@@ -83,11 +148,27 @@ RUNS_DIR = Path(os.environ.get("PEDSIM_RESULTS_DIR", str(ROOT / "runs_web")))
 RESULTS_INDEX_PATH = RUNS_DIR / "training_results.jsonl"
 RESULTS_FULL_REPORTS_PATH = RUNS_DIR / "training_full_reports.jsonl"
 QUESTIONNAIRE_RESULTS_FILENAME = "questionnaire_results.jsonl"
+DEMO_DATA_DIR = ROOT / "demo_data"
+COMPETITION_RUNTIME_DIR = Path(
+    _deployment_setting(
+        "PEDSIM_COMPETITION_RESULTS_DIR",
+        str(ROOT / "competition_runtime"),
+    )
+)
 RESULTS_LOCK_FILENAME = ".results.lock"
 RESULTS_WARNING_FILENAME = "storage_warnings.log"
 CONFIG_DIR = ROOT / "config"
 ORG_ACCESS_CODES_PATH = CONFIG_DIR / "org_access_codes.json"
-DRAFTS_DIR = Path(os.environ.get("PEDSIM_DRAFTS_DIR", str(ROOT / ".runtime" / "training_drafts")))
+DRAFTS_DIR = Path(
+    _deployment_setting(
+        "PEDSIM_DRAFTS_DIR",
+        str(
+            COMPETITION_RUNTIME_DIR / "training_drafts"
+            if is_competition_mode()
+            else ROOT / ".runtime" / "training_drafts"
+        ),
+    )
+)
 DRAFT_QUERY_KEY = "resume"
 DRAFT_TTL_SECONDS = 12 * 60 * 60
 DRAFT_MAX_BYTES = 5 * 1024 * 1024
@@ -95,15 +176,39 @@ APP_VERSION = SYSTEM_VERSION
 AUTH_CONTEXT_ERROR_MESSAGE = "当前管理权限无效或已失效，请重新登录。"
 PLATFORM_ADMIN_ROLE = "platform_admin"
 UNIT_ADMIN_ROLES = {"clinical_admin", "academy_admin"}
-AUTH_CONTEXT_SIGNING_KEY = token_secrets.token_bytes(32)
+COMPETITION_ADMIN_ROLE = "competition_admin"
 
-DEFAULT_INSTITUTION = "四川大学华西第二医院"
 
-CAMPUS_CODES = {
-    "锦江院区": "JJYQ",
-    "眉山院区": "MSYQ",
-    "高新院区": "GXYQ",
-}
+def current_storage_adapter() -> StorageAdapter:
+    return build_storage_adapter(
+        APP_MODE,
+        production_directory=Path(RESULTS_INDEX_PATH).parent,
+        demo_directory=DEMO_DATA_DIR,
+        competition_runtime_directory=COMPETITION_RUNTIME_DIR,
+    )
+
+DEFAULT_INSTITUTION = (
+    "示范教学单位"
+    if is_competition_mode()
+    else _deployment_setting(
+        "PEDSIM_DEFAULT_INSTITUTION",
+        "四川大学华西第二医院",
+    )
+)
+
+CAMPUS_CODES = (
+    {
+        "教学区域A": "JXA",
+        "教学区域B": "JXB",
+        "教学区域C": "JXC",
+    }
+    if is_competition_mode()
+    else {
+        "锦江院区": "JJYQ",
+        "眉山院区": "MSYQ",
+        "高新院区": "GXYQ",
+    }
+)
 
 DEPARTMENT_CODES = {
     "呼吸科": "HXK",
@@ -123,7 +228,7 @@ ALL_ASSESSMENT_PHASE_OPTIONS = CLINICAL_ASSESSMENT_PHASE_OPTIONS + ACADEMY_ASSES
 # Backward-compatible alias used by older clinical UI/export code.
 ASSESSMENT_PHASE_OPTIONS = CLINICAL_ASSESSMENT_PHASE_OPTIONS
 
-COLLECTION_MODE_OPTIONS = ["正式采集", "测试演练"]
+COLLECTION_MODE_OPTIONS = ["测试演练"] if is_competition_mode() else ["正式采集", "测试演练"]
 COLLECTION_MODE_CODES = {
     "正式采集": "formal",
     "测试演练": "pilot",
@@ -154,26 +259,6 @@ TEACHING_EXPERIENCE_ITEMS = [
     "该系统提高了我面对类似情景时的信心。",
     "我愿意推荐该系统用于护理实训教学。",
 ]
-
-ACADEMY_EXAM_ACTION_LABELS = {
-    "allergy_identification": "判断当前异常情况",
-    "stop_infusion": "暂停当前输入并处理通路",
-    "call_help": "呼叫老师/上级人员",
-    "high_flow_oxygen": "给予氧气支持",
-    "connect_monitor": "连接监测设备",
-    "check_bp": "测量血压和循环状态",
-    "prepare_rescue_equipment": "准备急救物品及相关药物",
-    "academy_reassess": "复测生命体征并复评",
-    "academy_family_communication": "简要告知并安抚家属",
-    "academy_sbar_handoff": "选择需要汇报的内容",
-    "continue_infusion": "继续观察，暂不改变输入",
-    "remove_iv": "直接拔除静脉通路",
-    "ask_family_first": "先进一步询问相关病史",
-    "send_family_for_help": "让家属去寻找帮助",
-    "prepare_steroid_antihistamine_only": "先准备辅助用药",
-    "student_independent_epinephrine": "自行完成急救注射操作",
-    "watch_only": "旁观等待老师处理",
-}
 
 ACADEMY_SCENARIO_LIBRARY = {
     "academy_anaphylaxis_rescue": {
@@ -445,6 +530,8 @@ def init_session() -> None:
         "attempt_no": 1,
         "profile_completed": False,
         "app_unlocked": False,
+        "competition_review_unlocked": False,
+        "competition_admin_unlocked": False,
         "admin_unlocked": False,
         "admin_scope": None,
         "admin_scope_type": "",
@@ -488,6 +575,14 @@ def init_session() -> None:
         "result_saved": False,
         "admin_export_view": "训练汇总",
         "last_completion_notice": "",
+        "academy_flow_page": "",
+        "academy_stage_reports": {},
+        "manual_completion_confirmation": False,
+        "restart_stage_confirmation": False,
+        "processed_ui_events": [],
+        "academy_stage_session_ids": {},
+        "academy_transition_locks": {},
+        "abandoned_stage_sessions": [],
         "draft_id": "",
         "draft_created_at": 0.0,
         "draft_restore_checked": False,
@@ -588,7 +683,45 @@ DRAFT_SESSION_KEYS = (
     "teaching_experience_total",
     "teaching_experience_mean",
     "last_completion_notice",
+    "academy_flow_page",
+    "academy_stage_reports",
+    "manual_completion_confirmation",
+    "restart_stage_confirmation",
+    "processed_ui_events",
+    "academy_stage_session_ids",
+    "academy_transition_locks",
+    "abandoned_stage_sessions",
 )
+
+
+def claim_ui_event(
+    event_type: str,
+    subject: str = "",
+    state_marker: object = None,
+) -> bool:
+    """Claim one UI event without blocking legitimate later medical repeats."""
+
+    if state_marker is None:
+        simulator = st.session_state.get("active_simulator")
+        state_marker = getattr(getattr(simulator, "state", None), "t", "")
+    key = "|".join(
+        (
+            str(st.session_state.get("participant_id", "") or ""),
+            str(st.session_state.get("assessment_phase", "") or ""),
+            str(st.session_state.get("session_id", "") or ""),
+            str(event_type or ""),
+            str(subject or ""),
+            str(state_marker if state_marker is not None else ""),
+        )
+    )
+    claimed = st.session_state.get("processed_ui_events", [])
+    if not isinstance(claimed, list):
+        claimed = []
+    if key in claimed:
+        return False
+    claimed.append(key)
+    st.session_state.processed_ui_events = claimed[-200:]
+    return True
 
 
 def _valid_draft_id(value: object) -> bool:
@@ -997,6 +1130,27 @@ def get_auth_credentials() -> Tuple[str, str]:
     return access_code, admin_password
 
 
+def get_competition_auth_credentials() -> Tuple[str, str]:
+    try:
+        secrets_source = st.secrets  # type: ignore[attr-defined]
+    except Exception:
+        secrets_source = None
+    credentials = competition_credentials(
+        secrets=secrets_source,
+        environ=os.environ,
+    )
+    if (
+        credentials.review_configured
+        and credentials.admin_configured
+        and token_secrets.compare_digest(
+            credentials.review_code,
+            credentials.admin_code,
+        )
+    ):
+        return "", ""
+    return credentials.review_code, credentials.admin_code
+
+
 def require_auth_credentials() -> Tuple[str, str]:
     try:
         return get_auth_credentials()
@@ -1012,6 +1166,8 @@ def credential_matches(submitted: object, expected: str) -> bool:
 
 
 def load_org_access_records() -> List[Dict[str, Any]]:
+    if is_competition_mode():
+        return []
     try:
         secret_records = st.secrets.get("ORG_ACCESS_RECORDS", None)  # type: ignore[attr-defined]
     except Exception:
@@ -1098,9 +1254,20 @@ def organization_display_label(identity: Dict[str, Any]) -> str:
     return display or str(identity.get("organization_id", ""))
 
 
+def _authorization_signing_key() -> bytes:
+    """Return a stable deployment key; predictable fallback is test-only."""
+    configured = _deployment_setting("AUTH_CONTEXT_SIGNING_KEY", "").strip()
+    if len(configured) >= 32:
+        return hashlib.sha256(configured.encode("utf-8")).digest()
+    if not hasattr(st, "__name__") or os.environ.get("PEDSIM_AUTOMATED_TEST") == "1":
+        material = "test-only-authorization-context:" + APP_VERSION
+        return hashlib.sha256(material.encode("utf-8")).digest()
+    raise AuthConfigurationError(("AUTH_CONTEXT_SIGNING_KEY",))
+
+
 def _authorization_signature(role: str, organization_type: str, organization_id: str) -> str:
     payload = f"{role}\n{organization_type}\n{organization_id}".encode("utf-8")
-    return hmac.new(AUTH_CONTEXT_SIGNING_KEY, payload, hashlib.sha256).hexdigest()
+    return hmac.new(_authorization_signing_key(), payload, hashlib.sha256).hexdigest()
 
 
 def _issue_authorization_context(
@@ -1135,6 +1302,14 @@ def create_platform_admin_context() -> Dict[str, Any]:
     )
 
 
+def create_competition_admin_context() -> Dict[str, Any]:
+    return _issue_authorization_context(
+        COMPETITION_ADMIN_ROLE,
+        "competition",
+        "COMPETITION_DEMO",
+    )
+
+
 def validate_authorization_context(
     context: object,
 ) -> Optional[Dict[str, Any]]:
@@ -1146,12 +1321,25 @@ def validate_authorization_context(
     signature = str(context.get("signature", "") or "")
     if not role or not organization_type or not organization_id or not signature:
         return None
-    expected_signature = _authorization_signature(
-        role,
-        organization_type,
-        organization_id,
-    )
+    try:
+        expected_signature = _authorization_signature(
+            role,
+            organization_type,
+            organization_id,
+        )
+    except AuthConfigurationError:
+        return None
     if not token_secrets.compare_digest(signature, expected_signature):
+        return None
+    if role == COMPETITION_ADMIN_ROLE:
+        if (
+            not is_competition_mode()
+            or organization_type != "competition"
+            or organization_id != "COMPETITION_DEMO"
+        ):
+            return None
+        return create_competition_admin_context()
+    if is_competition_mode():
         return None
     if role == PLATFORM_ADMIN_ROLE:
         if organization_type != "platform" or organization_id != "PLATFORM":
@@ -1202,6 +1390,8 @@ def _record_matches_authorization(
     record: Dict[str, Any],
     authorization: Dict[str, Any],
 ) -> bool:
+    if authorization["role"] == COMPETITION_ADMIN_ROLE:
+        return is_competition_mode()
     if authorization["role"] == PLATFORM_ADMIN_ROLE:
         return True
     organization_type, organization_id = _record_organization(record)
@@ -1229,6 +1419,8 @@ def scope_label(scope: object) -> str:
     if authorization is None:
         return "无效权限"
     role = authorization["role"]
+    if role == COMPETITION_ADMIN_ROLE:
+        return "评审只读管理员｜仅虚拟演示数据"
     if role == PLATFORM_ADMIN_ROLE:
         return "总管理员｜可查看全部数据"
     if role == "clinical_admin":
@@ -1240,6 +1432,13 @@ def scope_label(scope: object) -> str:
     if role == "academy_admin":
         return f"学院单位管理员｜{authorization.get('school_name', '')}"
     return "未知权限"
+
+
+def authorization_allows(context: object, permission: str) -> bool:
+    authorization = validate_authorization_context(context)
+    if authorization is None:
+        return False
+    return str(permission) in set(authorization.get("permissions", []))
 
 
 def build_session_metadata(end_reason: str = "") -> Dict[str, Any]:
@@ -1449,6 +1648,8 @@ def _secret_get(*names: str, default: str = "") -> str:
 
 
 def database_configured() -> bool:
+    if not current_storage_adapter().allows_database:
+        return False
     return bool(_secret_get("SUPABASE_URL")) and bool(_secret_get("SUPABASE_SERVICE_ROLE_KEY"))
 
 
@@ -1459,6 +1660,8 @@ def get_supabase_client_cached(url: str, key: str):
 
 
 def get_supabase_client():
+    if not current_storage_adapter().allows_database:
+        return None
     url = _secret_get("SUPABASE_URL")
     key = _secret_get("SUPABASE_SERVICE_ROLE_KEY")
     if not url or not key:
@@ -1586,15 +1789,15 @@ def ensure_questionnaire_submission_id() -> str:
 
 
 def _questionnaire_results_path() -> Path:
-    return Path(RESULTS_INDEX_PATH).parent / QUESTIONNAIRE_RESULTS_FILENAME
+    return current_storage_adapter().write_paths().questionnaires
 
 
 def _results_lock_path() -> Path:
-    return Path(RESULTS_INDEX_PATH).parent / RESULTS_LOCK_FILENAME
+    return current_storage_adapter().write_paths().lock_file
 
 
 def _results_warning_path() -> Path:
-    return Path(RESULTS_INDEX_PATH).parent / RESULTS_WARNING_FILENAME
+    return current_storage_adapter().write_paths().warning_file
 
 
 @contextmanager
@@ -1692,15 +1895,16 @@ def _append_jsonl_unlocked(path: Path, record: Dict[str, Any]) -> None:
 def save_result_record_local(report: Dict[str, Any]) -> bool:
     completion_id = ensure_report_completion_id(report)
     created = False
+    paths = current_storage_adapter().write_paths()
     with _local_results_lock():
-        index_records, index_warnings = _read_jsonl_unlocked(Path(RESULTS_INDEX_PATH))
-        full_reports, full_warnings = _read_jsonl_unlocked(Path(RESULTS_FULL_REPORTS_PATH))
+        index_records, index_warnings = _read_jsonl_unlocked(paths.results_index)
+        full_reports, full_warnings = _read_jsonl_unlocked(paths.full_reports)
         _append_storage_warnings_unlocked(index_warnings + full_warnings)
         if completion_id not in {_record_completion_id(item) for item in index_records}:
-            _append_jsonl_unlocked(Path(RESULTS_INDEX_PATH), flatten_record(report))
+            _append_jsonl_unlocked(paths.results_index, flatten_record(report))
             created = True
         if completion_id not in {_record_completion_id(item) for item in full_reports}:
-            _append_jsonl_unlocked(Path(RESULTS_FULL_REPORTS_PATH), report)
+            _append_jsonl_unlocked(paths.full_reports, report)
             created = True
     return created
 
@@ -1725,6 +1929,8 @@ def save_questionnaire_record_local(record: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def save_result_record_database(report: Dict[str, Any]) -> Tuple[bool, str]:
+    if not current_storage_adapter().allows_database:
+        return False, "评审环境已禁用正式数据库写入。"
     if not database_configured():
         return False, "数据库未配置：未检测到 SUPABASE_URL 或 SUPABASE_SERVICE_ROLE_KEY。"
     try:
@@ -1751,9 +1957,13 @@ def load_result_records_local(authorization_context: object) -> List[Dict[str, A
     authorization = validate_authorization_context(authorization_context)
     if authorization is None:
         return []
-    with _local_results_lock():
-        records, warnings = _read_jsonl_unlocked(Path(RESULTS_INDEX_PATH))
-        _append_storage_warnings_unlocked(warnings)
+    path = current_storage_adapter().admin_read_paths().results_index
+    if is_competition_mode():
+        records, _ = _read_jsonl_unlocked(path)
+    else:
+        with _local_results_lock():
+            records, warnings = _read_jsonl_unlocked(path)
+            _append_storage_warnings_unlocked(warnings)
     return [
         record
         for record in records
@@ -1791,6 +2001,8 @@ def load_result_rows_database(
     authorization = validate_authorization_context(authorization_context)
     if authorization is None:
         return [], "权限无效，未读取数据库。"
+    if not current_storage_adapter().allows_database:
+        return [], "评审环境已禁用正式数据库读取。"
     if not database_configured():
         return [], "数据库未配置。"
     try:
@@ -1837,10 +2049,17 @@ def load_full_reports_local(authorization_context: object) -> List[Dict[str, Any
     authorization = validate_authorization_context(authorization_context)
     if authorization is None:
         return []
-    with _local_results_lock():
-        reports, report_warnings = _read_jsonl_unlocked(Path(RESULTS_FULL_REPORTS_PATH))
-        questionnaires, questionnaire_warnings = _read_jsonl_unlocked(_questionnaire_results_path())
-        _append_storage_warnings_unlocked(report_warnings + questionnaire_warnings)
+    paths = current_storage_adapter().admin_read_paths()
+    if is_competition_mode():
+        reports, _ = _read_jsonl_unlocked(paths.full_reports)
+        questionnaires, _ = _read_jsonl_unlocked(paths.questionnaires)
+    else:
+        with _local_results_lock():
+            reports, report_warnings = _read_jsonl_unlocked(paths.full_reports)
+            questionnaires, questionnaire_warnings = _read_jsonl_unlocked(paths.questionnaires)
+            _append_storage_warnings_unlocked(
+                report_warnings + questionnaire_warnings
+            )
     questionnaire_by_completion = {
         str(item.get("completion_id", "")): item
         for item in questionnaires
@@ -1892,6 +2111,28 @@ def _json_compact(value: Any) -> str:
 
 def _csv_ready_row(row: Dict[str, Any]) -> Dict[str, Any]:
     return {k: _json_compact(v) for k, v in row.items()}
+
+
+def _dataframe_ready_records(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Normalize mixed columns so Streamlit does not emit Arrow fallback traces."""
+    normalized = [dict(item) for item in records if isinstance(item, dict)]
+    keys = {key for item in normalized for key in item}
+    mixed_keys = set()
+    for key in keys:
+        value_types = {
+            type(item.get(key))
+            for item in normalized
+            if item.get(key) is not None
+        }
+        if len(value_types) > 1 or any(
+            value_type in (dict, list, tuple)
+            for value_type in value_types
+        ):
+            mixed_keys.add(key)
+    for item in normalized:
+        for key in mixed_keys:
+            item[key] = _json_compact(item.get(key))
+    return normalized
 
 
 def records_to_csv_bytes(
@@ -2574,12 +2815,8 @@ def build_data_quality_records(summary_records: List[Dict[str, Any]]) -> List[Di
 
 def display_action_label(action: Dict[str, Any], sim: Optional[Simulator] = None) -> str:
     aid = str(action.get("id", ""))
-    # In academy pre/post assessment, use neutral labels to avoid leaking the answer.
-    if (
-        sim is not None
-        and current_flow_strategy(sim).use_neutral_action_labels
-    ):
-        return ACADEMY_EXAM_ACTION_LABELS.get(aid, str(action.get("label", aid)))
+    if sim is not None and current_flow_strategy(sim).system_mode == "academy":
+        return academy_action_short_label(action)
     return str(action.get("label", aid))
 
 
@@ -2589,6 +2826,7 @@ def action_label_map(sim: Simulator) -> Dict[str, str]:
 
 def get_action_history_rows(sim: Simulator) -> List[Dict[str, Any]]:
     labels = action_label_map(sim)
+    show_results = current_flow_strategy(sim).show_immediate_feedback
     rows: List[Dict[str, Any]] = []
     for entry in sim.log:
         if entry.kind != "action":
@@ -2618,7 +2856,13 @@ def get_action_history_rows(sim: Simulator) -> List[Dict[str, Any]]:
             result = str(data.get("result", ""))
         elif data.get("gained") is not None:
             result = f"得分 +{data.get('gained')}"
-        rows.append({"时间": f"{entry.t}s", "操作": str(display), "结果": str(result)})
+        rows.append(
+            {
+                "时间": format_elapsed_time(entry.t),
+                "操作": str(display),
+                "结果": str(result) if show_results else "",
+            }
+        )
     return rows
 
 
@@ -2657,6 +2901,7 @@ def start_simulation(scenario_path: Path, mode: str, seed: int, participant_id: 
     st.session_state.questionnaire_submit_error = ""
     st.session_state.ended = False
     st.session_state.end_reason = ""
+    st.session_state.academy_flow_page = ""
     st.session_state.last_report = None
     st.session_state.last_report_paths = None
     st.session_state.last_ui_snapshot = None
@@ -2668,6 +2913,9 @@ def start_simulation(scenario_path: Path, mode: str, seed: int, participant_id: 
     st.session_state.pending_steroid_action_label = ""
     st.session_state.last_dose_feedback = ""
     st.session_state.last_dose_feedback_level = ""
+    st.session_state.manual_completion_confirmation = False
+    st.session_state.restart_stage_confirmation = False
+    st.session_state.processed_ui_events = []
     # 清空本阶段现场备注，避免备注串到下一阶段或下一位受试者。
     st.session_state.collection_note = ""
     st.session_state.result_saved = False
@@ -2692,6 +2940,14 @@ def start_simulation(scenario_path: Path, mode: str, seed: int, participant_id: 
     st.session_state.baseline_performance_completed = False
     if st.session_state.get("assessment_phase") not in ("基线评估", "课前测评"):
         st.session_state.baseline_stage_completed = False
+    if current_system_mode() == "academy":
+        stage_sessions = dict(
+            st.session_state.get("academy_stage_session_ids", {}) or {}
+        )
+        stage_sessions[str(st.session_state.get("assessment_phase", "") or "")] = (
+            st.session_state.session_id
+        )
+        st.session_state.academy_stage_session_ids = stage_sessions
     persist_active_training_draft()
 
 
@@ -2768,13 +3024,7 @@ def restart_completed_clinical_stage() -> bool:
     simulator = st.session_state.get("active_simulator")
     if not scenario_path.is_file() or not isinstance(simulator, Simulator):
         return False
-    start_simulation(
-        scenario_path=scenario_path,
-        mode=simulator.mode,
-        seed=-1,
-        participant_id=str(st.session_state.get("participant_id", "") or "anonymous"),
-    )
-    return True
+    return restart_current_stage(scenario_path, simulator.mode)
 
 
 def return_home_after_clinical_result() -> None:
@@ -2914,6 +3164,11 @@ def submit_academy_post_evaluation(
     sus_values: List[int],
     teaching_values: List[int],
 ) -> Tuple[bool, str]:
+    if (
+        st.session_state.get("questionnaire_submit_status") == "completed"
+        or st.session_state.get("academy_post_evaluation_completed", False)
+    ):
+        return True, "课后评价已完成并保存，请勿重复提交。"
     normalized_sus = _normalized_questionnaire_values(sus_values, len(SUS_ITEMS))
     normalized_teaching = _normalized_questionnaire_values(
         teaching_values,
@@ -3024,7 +3279,12 @@ def submit_academy_post_evaluation(
     st.session_state.pending_academy_post_evaluation = False
     st.session_state.pending_post_evaluation_report = None
     st.session_state.pending_post_evaluation_reason = ""
-    _return_to_registration_after_save(report, why)
+    stage_reports = dict(st.session_state.get("academy_stage_reports", {}) or {})
+    stage_reports["posttest"] = report
+    st.session_state.academy_stage_reports = stage_reports
+    st.session_state.academy_flow_page = "flow_complete"
+    st.session_state.ended = True
+    persist_active_training_draft()
     return True, "课后评价已完成并保存。"
 
 
@@ -3064,7 +3324,13 @@ def render_academy_post_evaluation_survey() -> None:
                     key=f"teach_{idx}_{st.session_state.session_id}",
                 )
             )
-        submitted = st.form_submit_button("提交或重试课后评价", type="primary", use_container_width=True)
+        submitted = st.form_submit_button(
+            questionnaire_submit_button_label(
+                st.session_state.get("questionnaire_submit_status", "")
+            ),
+            type="primary",
+            use_container_width=True,
+        )
     if submitted:
         ok, message = submit_academy_post_evaluation(
             [int(value) for value in sus_values],
@@ -3079,29 +3345,7 @@ def render_academy_post_evaluation_survey() -> None:
 
 def _save_and_end_report(report: Dict[str, Any], why: str) -> None:
     strategy = current_flow_strategy()
-    phase_strategy = flow_strategy_for_phase(
-        current_system_mode(),
-        st.session_state.get("assessment_phase", ""),
-    )
     ensure_report_completion_id(report)
-    if _needs_academy_post_evaluation(report, why):
-        if not st.session_state.get("result_saved", False):
-            out_dir = RUNS_DIR / st.session_state.session_id
-            json_path, md_path = save_report(report, str(out_dir))
-            save_result_record(report)
-            st.session_state.result_saved = True
-            st.session_state.last_report_paths = (json_path, md_path)
-        st.session_state.pending_academy_post_evaluation = True
-        st.session_state.pending_post_evaluation_report = report
-        st.session_state.pending_post_evaluation_reason = why
-        st.session_state.last_report = report
-        ensure_questionnaire_submission_id()
-        if st.session_state.get("questionnaire_submit_status") != "failed":
-            st.session_state.questionnaire_submit_status = "pending"
-            st.session_state.questionnaire_submit_error = ""
-        if phase_strategy.recovery.preserve_pending_questionnaire:
-            persist_active_training_draft()
-        return
     if (
         strategy.result_page_behavior == "persistent_clinical_result"
         and st.session_state.get("result_saved", False)
@@ -3112,13 +3356,37 @@ def _save_and_end_report(report: Dict[str, Any], why: str) -> None:
             str(st.session_state.get("end_reason", "") or why),
         )
         return
-    out_dir = RUNS_DIR / st.session_state.session_id
-    json_path, md_path = save_report(report, str(out_dir))
+    out_dir = current_storage_adapter().write_paths().report_runs / st.session_state.session_id
     if not st.session_state.get("result_saved", False):
+        json_path, md_path = save_report(report, str(out_dir))
         save_result_record(report)
+        st.session_state.last_report_paths = (json_path, md_path)
     st.session_state.result_saved = True
     st.session_state.last_report = report
-    st.session_state.last_report_paths = (json_path, md_path)
+    if current_system_mode() == "academy":
+        phase = str(st.session_state.get("assessment_phase", "") or "")
+        page = completion_page_for_phase(phase)
+        report_key = stage_report_key(phase)
+        stage_reports = dict(st.session_state.get("academy_stage_reports", {}) or {})
+        if report_key and report_key not in stage_reports:
+            stage_reports[report_key] = json.loads(
+                json.dumps(report, ensure_ascii=False, default=str)
+            )
+        st.session_state.academy_stage_reports = stage_reports
+        st.session_state.academy_flow_page = page
+        st.session_state.ended = True
+        st.session_state.end_reason = why
+        st.session_state.pending_academy_post_evaluation = False
+        if phase == "课后考核" and _needs_academy_post_evaluation(report, why):
+            st.session_state.pending_academy_post_evaluation = True
+            st.session_state.pending_post_evaluation_report = report
+            st.session_state.pending_post_evaluation_reason = why
+            ensure_questionnaire_submission_id()
+            if st.session_state.get("questionnaire_submit_status") != "failed":
+                st.session_state.questionnaire_submit_status = "pending"
+                st.session_state.questionnaire_submit_error = ""
+        persist_active_training_draft()
+        return
     if strategy.result_page_behavior == "persistent_clinical_result":
         _enter_completed_clinical_result(report, why)
     else:
@@ -3137,6 +3405,8 @@ def _needs_baseline_post_survey(why: str = "") -> bool:
         phase,
     )
     return bool(
+        current_system_mode() == "clinical"
+        and
         strategy.questionnaire_transition_for_phase(phase)
         == "prior_experience_survey"
         and not st.session_state.get(
@@ -3152,6 +3422,15 @@ def finalize_if_done() -> None:
         return
     done, why = sim.is_done()
     if done:
+        if (
+            current_system_mode() == "academy"
+            and not should_auto_finalize_academy_phase(
+                st.session_state.get("assessment_phase", ""),
+                sim.mode,
+                why,
+            )
+        ):
+            return
         report = enrich_report(sim.build_report(), end_reason=why)
         if _needs_baseline_post_survey(why):
             st.session_state.baseline_performance_completed = True
@@ -3207,6 +3486,12 @@ def profile_required_missing() -> List[str]:
 
 
 def render_version_corner() -> None:
+    if is_competition_mode():
+        st.markdown(
+            "<div class='version-corner'>比赛评审演示环境</div>",
+            unsafe_allow_html=True,
+        )
+        return
     st.markdown(
         f"<div class='version-corner'>版本：{html.escape(APP_VERSION)}｜仅用于护理教学、培训与科研</div>",
         unsafe_allow_html=True,
@@ -3227,7 +3512,6 @@ def render_participant_entry_page() -> None:
         """,
         unsafe_allow_html=True,
     )
-
     outer_left, center, outer_right = st.columns([0.08, 0.84, 0.08])
     with center:
         if st.session_state.get("last_completion_notice"):
@@ -3303,7 +3587,11 @@ def render_participant_entry_page() -> None:
                 participant_initials = b2.text_input(
                     "姓名首字母（必填）",
                     value=st.session_state.participant_initials,
-                    placeholder="例如 王思席填 WSX",
+                    placeholder=(
+                        "示例学员"
+                        if is_competition_mode()
+                        else "例如 王思席填 WSX"
+                    ),
                     max_chars=8,
                 )
                 collection_mode = b3.selectbox(
@@ -3455,7 +3743,11 @@ def render_participant_entry_page() -> None:
                 institution = c0.text_input(
                     "医院全称（必填）",
                     value=st.session_state.institution or DEFAULT_INSTITUTION,
-                    placeholder="请填写医院全称，如：四川大学华西第二医院",
+                    placeholder=(
+                        "示范教学单位"
+                        if is_competition_mode()
+                        else "请填写医院全称，如：四川大学华西第二医院"
+                    ),
                 )
                 c0.caption("当前未配置授权机构；本次记录不会归入任何单位管理员范围。")
             campus = c1.selectbox(
@@ -3471,7 +3763,11 @@ def render_participant_entry_page() -> None:
             participant_initials = c3.text_input(
                 "姓名首字母（必填）",
                 value=st.session_state.participant_initials,
-                placeholder="例如 王思席填 WSX",
+                placeholder=(
+                    "示例学员"
+                    if is_competition_mode()
+                    else "例如 王思席填 WSX"
+                ),
                 max_chars=8,
             )
 
@@ -3555,7 +3851,7 @@ def render_participant_entry_page() -> None:
             )
 
             st.markdown(
-                "<div class='form-note'>说明：项目编号与第几次测试不再由受试者填写；系统将在后台保留版本号、Session ID 和默认尝试序号用于数据追踪；部分补充信息将在相应流程结束后按系统提示采集。</div>",
+                "<div class='form-note'>说明：项目编号与第几次测试不再由受试者填写；系统将在后台保留版本号、会话编号和默认尝试序号用于数据追踪；部分补充信息将在相应流程结束后按系统提示采集。</div>",
                 unsafe_allow_html=True,
             )
 
@@ -3620,12 +3916,57 @@ def render_participant_entry_page() -> None:
                 st.rerun()
 
 
+def restart_current_stage(scenario_path: Path, mode: str) -> bool:
+    """Start a fresh session for only the active phase after explicit confirmation."""
+
+    if not scenario_path.is_file():
+        return False
+    participant_id = str(st.session_state.get("participant_id", "") or "")
+    if not participant_id:
+        return False
+    previous_session_id = str(st.session_state.get("session_id", "") or "")
+    if previous_session_id:
+        abandoned = list(
+            st.session_state.get("abandoned_stage_sessions", []) or []
+        )
+        marker = {
+            "participant_id": participant_id,
+            "assessment_phase": str(
+                st.session_state.get("assessment_phase", "") or ""
+            ),
+            "session_id": previous_session_id,
+            "status": "restarted",
+        }
+        if marker not in abandoned:
+            abandoned.append(marker)
+        st.session_state.abandoned_stage_sessions = abandoned[-20:]
+    start_simulation(
+        scenario_path=scenario_path,
+        mode=mode,
+        seed=-1,
+        participant_id=participant_id,
+    )
+    return True
+
+
 def render_sidebar() -> None:
-    st.sidebar.title(f"{APP_VERSION} 控制台")
+    st.sidebar.title("评审演示控制台" if is_competition_mode() else f"{APP_VERSION} 控制台")
     mode = current_system_mode()
     mode_label = current_system_mode_label()
     st.sidebar.caption(f"当前模式：{mode_label}")
-    if st.sidebar.button("切换临床/学院模式", use_container_width=True, disabled=st.session_state.active_simulator is not None):
+    if is_competition_mode():
+        if st.sidebar.button("返回评审首页", use_container_width=True):
+            clear_training_draft()
+            st.session_state.system_mode_selected = False
+            st.session_state.profile_completed = False
+            st.session_state.active_simulator = None
+            st.session_state.ended = False
+            st.session_state.academy_flow_page = ""
+            st.rerun()
+        if st.sidebar.button("退出评审环境", use_container_width=True):
+            clear_competition_session()
+            st.rerun()
+    elif st.sidebar.button("切换临床/学院模式", use_container_width=True, disabled=st.session_state.active_simulator is not None):
         clear_training_draft()
         st.session_state.system_mode_selected = False
         st.session_state.academy_scenario_selected = False
@@ -3633,7 +3974,11 @@ def render_sidebar() -> None:
         st.session_state.active_simulator = None
         st.session_state.ended = False
         st.rerun()
-    if mode == "academy" and st.sidebar.button("重新选择学院情景", use_container_width=True, disabled=st.session_state.active_simulator is not None):
+    if (
+        not is_competition_mode()
+        and mode == "academy"
+        and st.sidebar.button("重新选择学院情景", use_container_width=True, disabled=st.session_state.active_simulator is not None)
+    ):
         clear_training_draft()
         st.session_state.academy_scenario_selected = False
         st.session_state.profile_completed = False
@@ -3641,11 +3986,19 @@ def render_sidebar() -> None:
         st.session_state.ended = False
         st.rerun()
 
-    st.session_state.page = st.sidebar.radio(
-        "页面",
-        options=["训练系统", "管理员后台"],
-        index=0 if st.session_state.page == "训练系统" else 1,
-    )
+    if (
+        is_competition_mode()
+        and st.session_state.get("competition_admin_unlocked", False)
+        and not st.session_state.get("competition_review_unlocked", False)
+    ):
+        st.session_state.page = "管理员后台"
+        st.sidebar.caption("当前会话仅具有评审只读管理权限。")
+    else:
+        st.session_state.page = st.sidebar.radio(
+            "页面",
+            options=["训练系统", "管理员后台"],
+            index=0 if st.session_state.page == "训练系统" else 1,
+        )
 
     if st.session_state.page == "管理员后台":
         st.sidebar.caption("管理员后台用于查看并导出训练记录。")
@@ -3656,7 +4009,22 @@ def render_sidebar() -> None:
         return
 
     st.sidebar.subheader("对象摘要")
-    if mode == "academy":
+    sidebar_phase_label = str(
+        st.session_state.get("assessment_phase", "")
+    )
+    if is_competition_mode() and mode == "academy":
+        sidebar_phase_label, _ = academy_sidebar_status(
+            st.session_state.get("academy_flow_page", ""),
+            sidebar_phase_label,
+            "",
+        )
+        st.sidebar.caption(
+            f"""学员：评审学员-001
+单位：{'示范护理学院' if mode == 'academy' else '示范教学单位'}
+阶段：{sidebar_phase_label}
+采集模式：虚拟演示"""
+        )
+    elif mode == "academy":
         st.sidebar.caption(f"""编号：{st.session_state.participant_id}
 院校：{st.session_state.school_name}
 情景：{st.session_state.get('academy_scenario_name', '')}
@@ -3669,7 +4037,11 @@ def render_sidebar() -> None:
 科室：{st.session_state.department}
 层级：{st.session_state.nurse_level}｜年限：{st.session_state.years_experience}年
 采集模式：{st.session_state.get('collection_mode', '')}""")
-    if st.sidebar.button("重新填写对象信息", use_container_width=True):
+    if is_competition_mode():
+        if st.sidebar.button("更换演示学员", use_container_width=True):
+            setup_competition_participant(mode)
+            st.rerun()
+    elif st.sidebar.button("重新填写对象信息", use_container_width=True):
         clear_training_draft()
         st.session_state.profile_completed = False
         st.session_state.active_simulator = None
@@ -3684,15 +4056,34 @@ def render_sidebar() -> None:
     st.session_state.workflow_locked = True
     st.session_state.mode = st.session_state.workflow_mode
 
+    scenario_name = (
+        academy_scenario_display_name(
+            st.session_state.get("academy_scenario_name", "")
+        )
+        if mode == "academy"
+        else "药物诱发严重过敏反应抢救"
+    )
+    workflow_mode_label = flow_strategy_for_phase(
+        mode,
+        st.session_state.get("assessment_phase", default_phase_for_mode(mode)),
+    ).workflow_mode_label
+    if mode == "academy":
+        sidebar_phase_label, workflow_mode_label = academy_sidebar_status(
+            st.session_state.get("academy_flow_page", ""),
+            st.session_state.get("assessment_phase", ""),
+            workflow_mode_label,
+        )
     st.sidebar.markdown(
         f"""
         <div style="border:1px solid #E5E7EB;border-radius:14px;padding:0.85rem 0.9rem;background:#F8FAFC;margin-bottom:0.75rem;">
-            <div style="font-size:0.85rem;color:#64748B;margin-bottom:0.25rem;">系统模式</div>
-            <div style="font-size:1.02rem;font-weight:750;color:#0F172A;margin-bottom:0.55rem;">{html.escape(mode_label)}</div>
-            <div style="font-size:0.85rem;color:#64748B;margin-bottom:0.25rem;">评估阶段</div>
-            <div style="font-size:1.05rem;font-weight:700;color:#0F172A;margin-bottom:0.55rem;">{html.escape(st.session_state.get('assessment_phase', ''))}</div>
-            <div style="font-size:0.85rem;color:#64748B;margin-bottom:0.25rem;">锁定流程</div>
-            <div style="font-size:0.98rem;font-weight:650;color:#1E293B;margin-bottom:0.55rem;">{html.escape(workflow.get('display', ''))}</div>
+            <div style="font-size:0.85rem;color:#64748B;margin-bottom:0.25rem;">阶段</div>
+            <div style="font-size:1.05rem;font-weight:700;color:#0F172A;margin-bottom:0.55rem;">{html.escape(sidebar_phase_label)}</div>
+            <div style="font-size:0.85rem;color:#64748B;margin-bottom:0.25rem;">模式</div>
+            <div style="font-size:0.98rem;font-weight:650;color:#1E293B;margin-bottom:0.55rem;">{html.escape(workflow_mode_label)}</div>
+            <div style="font-size:0.85rem;color:#64748B;margin-bottom:0.25rem;">情景</div>
+            <div style="font-size:0.98rem;font-weight:650;color:#1E293B;margin-bottom:0.55rem;">{html.escape(scenario_name)}</div>
+            <div style="font-size:0.85rem;color:#64748B;margin-bottom:0.25rem;">病例</div>
+            <div style="font-size:0.98rem;font-weight:650;color:#1E293B;margin-bottom:0.55rem;">{html.escape(workflow.get('script_label', ''))}</div>
             <div style="font-size:0.82rem;color:#475569;line-height:1.45;">{html.escape(workflow.get('task', ''))}</div>
         </div>
         """,
@@ -3706,18 +4097,73 @@ def render_sidebar() -> None:
     )
     if scenario_path is None:
         st.sidebar.error("未找到本阶段对应的病例脚本，请检查 scenarios 文件夹。")
-    elif st.sidebar.button("开始/重置本阶段任务", type="primary", use_container_width=True):
-        missing = profile_required_missing()
-        if missing:
-            st.sidebar.error("请先完整填写：" + "、".join(missing))
-        else:
-            start_simulation(
-                scenario_path=scenario_path,
-                mode=workflow.get("mode", "exam"),
-                seed=-1,
-                participant_id=st.session_state.participant_id.strip(),
-            )
-            st.rerun()
+    else:
+        start_label = (
+            "重新开始本阶段"
+            if st.session_state.active_simulator is not None
+            else "开始本阶段"
+        )
+    if scenario_path is not None:
+        if st.session_state.active_simulator is None:
+            if st.sidebar.button(
+                start_label,
+                type="primary",
+                use_container_width=True,
+            ):
+                missing = profile_required_missing()
+                if missing:
+                    st.sidebar.error("请先完整填写：" + "、".join(missing))
+                else:
+                    start_simulation(
+                        scenario_path=scenario_path,
+                        mode=workflow.get("mode", "exam"),
+                        seed=-1,
+                        participant_id=st.session_state.participant_id.strip(),
+                    )
+                    st.rerun()
+        elif (
+            not st.session_state.get("ended", False)
+            and not st.session_state.get("academy_flow_page", "")
+        ):
+            if (
+                not st.session_state.get("restart_stage_confirmation", False)
+                and st.sidebar.button(
+                    "重新开始本阶段",
+                    type="primary",
+                    use_container_width=True,
+                )
+            ):
+                st.session_state.restart_stage_confirmation = True
+                persist_active_training_draft()
+                st.rerun()
+            if st.session_state.get("restart_stage_confirmation", False):
+                st.sidebar.warning(
+                    "确认重新开始本阶段？\n\n当前阶段已执行操作将被清除。"
+                )
+                keep_col, restart_col = st.sidebar.columns(2, gap="small")
+                if keep_col.button(
+                    "继续当前阶段",
+                    use_container_width=True,
+                ):
+                    st.session_state.restart_stage_confirmation = False
+                    persist_active_training_draft()
+                    st.rerun()
+                if restart_col.button(
+                    "确认重新开始",
+                    type="primary",
+                    use_container_width=True,
+                ):
+                    if claim_ui_event(
+                        "restart_stage",
+                        str(st.session_state.get("assessment_phase", "") or ""),
+                        str(st.session_state.get("session_id", "") or ""),
+                    ) and restart_current_stage(
+                        scenario_path,
+                        workflow.get("mode", "exam"),
+                    ):
+                        st.rerun()
+                    else:
+                        st.sidebar.error("当前阶段未能重新开始，原状态仍已保留。")
 
     st.sidebar.divider()
     st.sidebar.caption("声明：仅用于护理教学、培训与科研可行性验证，不用于临床诊疗决策。")
@@ -3728,6 +4174,9 @@ def inject_compact_css() -> None:
     st.markdown(
         """
         <style>
+        html, body, [data-testid="stAppViewContainer"] {
+            overflow-x: hidden !important;
+        }
         .block-container {
             padding-top: 0.55rem !important;
             padding-bottom: 0.75rem !important;
@@ -3750,7 +4199,17 @@ def inject_compact_css() -> None:
         div[data-testid="stVerticalBlockBorderWrapper"] { padding: 0.76rem !important; }
         .stAlert { padding: 0.24rem 0.45rem !important; }
         hr { margin: 0.22rem 0 !important; }
-        [data-testid="stSidebar"] .block-container { padding-top: 0.65rem !important; }
+        [data-testid="stSidebar"] .block-container {
+            padding-top: 0.45rem !important;
+            padding-bottom: 0.45rem !important;
+        }
+        [data-testid="stSidebarContent"] {
+            overflow-y: auto !important;
+            max-height: 100vh !important;
+        }
+        [data-testid="stSidebar"] div[data-testid="stVerticalBlock"] {
+            gap: 0.30rem !important;
+        }
 
         .app-title {
             font-weight: 700;
@@ -3817,6 +4276,7 @@ def inject_compact_css() -> None:
         }
         .patient-head {
             display: flex;
+            flex-wrap: wrap;
             align-items: baseline;
             justify-content: space-between;
             gap: 1.0rem;
@@ -3826,7 +4286,8 @@ def inject_compact_css() -> None:
             font-weight: 800;
             font-size: 1.34rem;
             line-height: 1.2;
-            white-space: nowrap;
+            white-space: normal;
+            overflow-wrap: anywhere;
         }
         .patient-meta {
             color: #334155;
@@ -3926,14 +4387,12 @@ def inject_compact_css() -> None:
             font-size:0.82rem;
             text-align:right;
         }
-        /* V1.3.8: training/exam action buttons use full text with adaptive height.
-           Avoid clipping long Chinese option labels in teacher trial. */
         .stButton > button {
             height: auto !important;
-            min-height: 4.9rem !important;
-            padding: 0.62rem 0.72rem !important;
-            font-size: 0.98rem !important;
-            line-height: 1.34 !important;
+            min-height: 2.65rem !important;
+            padding: 0.34rem 0.56rem !important;
+            font-size: 0.90rem !important;
+            line-height: 1.22 !important;
             border-radius: 0.66rem !important;
             white-space: normal !important;
             word-break: break-word !important;
@@ -3945,10 +4404,19 @@ def inject_compact_css() -> None:
             white-space: normal !important;
             word-break: break-word !important;
             overflow-wrap: anywhere !important;
-            line-height: 1.34 !important;
+            line-height: 1.22 !important;
             overflow: visible !important;
             text-overflow: clip !important;
             display: block !important;
+        }
+        [data-testid="stSidebar"] .stButton > button {
+            min-height: 2.30rem !important;
+            padding: 0.28rem 0.48rem !important;
+        }
+        .stDownloadButton > button,
+        div[data-testid="stFormSubmitButton"] > button {
+            min-height: 2.65rem !important;
+            padding: 0.34rem 0.56rem !important;
         }
         .dose-card {
             border: 1px solid #c7d2fe;
@@ -4034,6 +4502,31 @@ def inject_compact_css() -> None:
         .history-time {color:#475569; font-size:0.86rem; font-weight:700;}
         .history-action {color:#111827; font-size:0.94rem; font-weight:750;}
         .history-result {color:#667085; font-size:0.82rem; text-align:right;}
+        @media (max-width: 1400px) {
+            .top-strip {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+            .vital-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+            .patient-title {
+                font-size: 1.14rem;
+            }
+            .patient-meta {
+                font-size: 0.96rem;
+                text-align: left;
+            }
+            .history-list {
+                max-height: 12rem;
+            }
+            .history-item {
+                grid-template-columns: 4.1rem minmax(0, 1fr);
+            }
+            .history-result {
+                grid-column: 2;
+                text-align: left;
+            }
+        }
         div[data-testid="stExpander"] details {
             border-radius: 0.55rem !important;
         }
@@ -4148,6 +4641,17 @@ def inject_compact_css() -> None:
         """,
         unsafe_allow_html=True,
     )
+    if is_competition_mode():
+        st.markdown(
+            """
+            <style>
+            [data-testid="stToolbar"], [data-testid="stDecoration"] {
+                display: none !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 def compact_header() -> None:
@@ -4233,14 +4737,14 @@ def render_top_status(sim: Simulator, changes: Dict[str, Any]) -> None:
     if strategy.score_presentation == "live":
         score_text = f"{sim.score}/{sim.max_score}"
         items = [
-            ("时间", f"{sim.state.t}s", False),
+            ("时间", format_elapsed_time(sim.state.t), False),
             ("得分", score_text, bool(changes.get("score"))),
             ("有效复评", str(int(sim.state.flags.get("reassess_count", 0))), bool(changes.get("reassess"))),
             ("操作数", str(action_count), False),
         ]
     else:
         items = [
-            ("时间", f"{sim.state.t}s", False),
+            ("时间", format_elapsed_time(sim.state.t), False),
             ("操作数", str(action_count), False),
         ]
     html_items = []
@@ -4258,7 +4762,7 @@ def render_top_status(sim: Simulator, changes: Dict[str, Any]) -> None:
         f"<div class='session-line'>"
         f"模式：{strategy.mode_label}｜"
         f"参与者：{html.escape(st.session_state.participant_id or 'anonymous')}｜"
-        f"Session：{html.escape(st.session_state.session_id[-13:] if st.session_state.session_id else '')}"
+        f"会话编号：{html.escape(st.session_state.session_id[-13:] if st.session_state.session_id else '')}"
         f"</div>"
         f"</div>",
         unsafe_allow_html=True,
@@ -4272,6 +4776,25 @@ def render_patient_status(sim: Simulator, scenario: Dict[str, Any], changes: Dic
         f"{patient.get('weight_kg','')} kg｜{patient.get('trigger','')}"
     )
     baseline = scenario.get("baseline", {}).get("time_zero_description", "")
+    academy_context = ""
+    if current_flow_strategy(sim).system_mode == "academy":
+        teaching_scenario = academy_scenario_display_name(
+            st.session_state.get("academy_scenario_name", "")
+        )
+        shock_present = float(sim.state.vitals.get("SBP", 0) or 0) < float(
+            sim.age_sbp_threshold()
+        )
+        current_condition = (
+            "已进展为过敏性休克"
+            if shock_present
+            else "严重过敏反应，尚需动态评估循环"
+        )
+        academy_context = (
+            "<div class='section-caption'>"
+            f"教学情景：{html.escape(teaching_scenario)}<br>"
+            f"当前病情：{html.escape(current_condition)}"
+            "</div>"
+        )
     symptom_now = symptoms_text(sim)
     changed_vitals: Set[str] = changes.get("vitals", set()) or set()
     any_clinical_change = bool(changes.get("symptoms")) or bool(changes.get("clinical")) or bool(changed_vitals)
@@ -4305,6 +4828,7 @@ def render_patient_status(sim: Simulator, scenario: Dict[str, Any], changes: Dic
                 <div class='patient-meta'>{html.escape(patient_meta)}</div>
             </div>
             <div class='baseline-box'>{html.escape(baseline)}</div>
+            {academy_context}
             <div class='clinical-card{flash_class(bool(changes.get('symptoms')))}'>
                 <div class='label'>当前症状</div>
                 <div class='value'>{html.escape(symptom_now)}</div>
@@ -4319,7 +4843,7 @@ def render_patient_status(sim: Simulator, scenario: Dict[str, Any], changes: Dic
 
 def render_intro() -> None:
     compact_header()
-    st.success(f"{current_system_mode_label()}对象信息已登记。请在左侧查看本阶段任务，然后点击“开始/重置本阶段任务”。")
+    st.success(f"{current_system_mode_label()}对象信息已登记。请在左侧查看本阶段任务，然后点击“开始本阶段”。")
 
     left, right = st.columns([1.15, 1], gap="large")
     with left:
@@ -4327,7 +4851,7 @@ def render_intro() -> None:
         if current_system_mode() == "academy":
             info_rows = [
                 {"项目": "系统模式", "内容": current_system_mode_label()},
-                {"项目": "教学情景", "内容": st.session_state.get("academy_scenario_name", "")},
+                {"项目": "教学情景", "内容": academy_scenario_display_name(st.session_state.get("academy_scenario_name", ""))},
                 {"项目": "情景类别", "内容": st.session_state.get("academy_scenario_category", "")},
                 {"项目": "适用课程", "内容": st.session_state.get("academy_course_type", "")},
                 {"项目": "参与者编号", "内容": st.session_state.get("participant_id", "")},
@@ -4364,7 +4888,7 @@ def render_intro() -> None:
 
             学院模式面向在校护生，采用通用情景库框架；当前已选择“{scenario_name}”情景，重点训练早期识别、停止可疑药物、呼救协作、给氧监测、准备肾上腺素及抢救物品、基础复评、家属安抚与简化SBAR汇报。
 
-            本模式不要求护生独立决策或独立实施肾上腺素给药、快速补液或高级生命支持，但要求其知道肾上腺素是一线急救药物，并能完成抢救配合与规范汇报。操作过程中请勿刷新页面、关闭页面或使用浏览器返回键。系统会自动记录操作过程，并在本阶段完成后返回登记界面。
+            本模式不要求护生独立决策或独立实施肾上腺素给药、快速补液或高级生命支持，但要求其知道肾上腺素是一线急救药物，并能在老师/医生指导下完成核对、给药配合与规范汇报。当前浏览器刷新后可恢复已保存的阶段状态；浏览器返回不会改变服务端已完成阶段或授权范围。系统会自动记录操作过程，并在本阶段完成后进入独立阶段完成页。
             """
         else:
             instruction = """
@@ -4375,6 +4899,73 @@ def render_intro() -> None:
             操作过程中如刷新当前页面，系统会在同一浏览器中恢复本阶段进度。请勿复制或分享带恢复标识的页面地址；关闭页面超过12小时后草稿会自动失效。本阶段完成后系统先显示完整结果页，确认得分与反馈后可继续下一阶段、重新开始或返回首页。
             """
         st.container(border=True).markdown(instruction)
+
+
+def clear_competition_session() -> None:
+    clear_training_draft()
+    st.session_state.clear()
+
+
+def setup_competition_participant(system_mode: str = "academy") -> None:
+    """Create a fully virtual participant without collecting reviewer identity."""
+    reset_for_mode_selection(system_mode)
+    st.session_state.participant_unique_suffix = uuid.uuid4().hex[:4].upper()
+    st.session_state.participant_initials = "DEMO"
+    st.session_state.collection_mode = "测试演练"
+    st.session_state.collection_note = ""
+    st.session_state.organization_id = ""
+    st.session_state.academy_stage_reports = {}
+    st.session_state.academy_stage_session_ids = {}
+    st.session_state.academy_transition_locks = {}
+    st.session_state.abandoned_stage_sessions = []
+    st.session_state.academy_flow_page = ""
+    st.session_state.prior_anaphylaxis_training = ""
+    st.session_state.prior_simulation_experience = ""
+    st.session_state.real_case_experience = ""
+    st.session_state.prior_experience_survey_completed = False
+    st.session_state.prior_experience_survey_time = ""
+    st.session_state.baseline_performance_completed = False
+    st.session_state.baseline_stage_completed = False
+    st.session_state.pending_academy_post_evaluation = False
+    st.session_state.pending_post_evaluation_report = None
+    st.session_state.academy_post_evaluation_completed = False
+    st.session_state.questionnaire_submission_id = ""
+    st.session_state.questionnaire_draft = {}
+    if system_mode == "academy":
+        scenario = ACADEMY_SCENARIO_LIBRARY[ACADEMY_SCENARIO_DEFAULT_ID]
+        st.session_state.academy_scenario_selected = True
+        st.session_state.school_name = "示范护理学院"
+        st.session_state.student_level = "本科"
+        st.session_state.student_grade = "三年级"
+        st.session_state.student_class = "评审演示组"
+        st.session_state.institution = "示范护理学院"
+        st.session_state.department = "示范教学单元"
+        st.session_state.participant_id = (
+            f"COMP-ACAD-{st.session_state.participant_unique_suffix}"
+        )
+        st.session_state.assessment_phase = "课前测评"
+        st.session_state.academy_scenario_id = scenario["id"]
+        st.session_state.academy_scenario_name = scenario["name"]
+    else:
+        st.session_state.institution = "示范教学单位"
+        st.session_state.campus = "教学区域A"
+        st.session_state.campus_code = "JXA"
+        st.session_state.department = "示范教学单元"
+        st.session_state.department_code = "JXDY"
+        st.session_state.department_type = "临床演示"
+        st.session_state.nurse_level = "演示学员"
+        st.session_state.years_experience = 0.0
+        st.session_state.years_experience_confirmed = True
+        st.session_state.participant_id = (
+            f"COMP-CLIN-{st.session_state.participant_unique_suffix}"
+        )
+        st.session_state.assessment_phase = default_phase_for_mode("clinical")
+    workflow = workflow_for_phase(st.session_state.assessment_phase, system_mode)
+    st.session_state.workflow_mode = workflow.get("mode", "exam")
+    st.session_state.workflow_script_role = workflow.get("script_role", "initial")
+    st.session_state.workflow_display = workflow.get("display", "")
+    st.session_state.mode = st.session_state.workflow_mode
+    st.session_state.profile_completed = True
 
 
 def reset_for_mode_selection(system_mode: str) -> None:
@@ -4401,6 +4992,8 @@ def reset_for_mode_selection(system_mode: str) -> None:
     st.session_state.last_report = None
     st.session_state.last_report_paths = None
     st.session_state.result_saved = False
+    st.session_state.restart_stage_confirmation = False
+    st.session_state.processed_ui_events = []
     st.session_state.pending_prior_experience_survey = False
     st.session_state.assessment_phase = default_phase_for_mode(system_mode)
     workflow = workflow_for_phase(st.session_state.assessment_phase, system_mode)
@@ -4522,6 +5115,43 @@ def render_system_mode_selection_page() -> bool:
     if st.session_state.get("system_mode_selected", False):
         return True
     render_version_corner()
+    if is_competition_mode():
+        st.markdown(
+            """
+            <div class='login-hero'>
+                <div class='login-title'>护理急救动态分支虚拟仿真教学智能体</div>
+                <div class='login-subtitle'>比赛评审演示环境</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.info("本环境使用虚拟身份与独立存储，不读取或写入正式运行数据。")
+        left, academy_col, clinical_col, right = st.columns(
+            [0.08, 0.50, 0.34, 0.08],
+            gap="large",
+        )
+        with academy_col:
+            st.container(border=True).markdown(
+                "### 学院教学完整体验\n课前测评 → 模拟训练 → 课后考核 → 结果 → SUS及教学体验评价"
+            )
+            if st.button(
+                "进入学院教学体验",
+                type="primary",
+                use_container_width=True,
+            ):
+                setup_competition_participant("academy")
+                st.rerun()
+        with clinical_col:
+            st.container(border=True).markdown(
+                "### 临床模式演示\n体验与正式系统相同的医学核心、病例和评分规则。"
+            )
+            if st.button("进入临床模式演示", use_container_width=True):
+                setup_competition_participant("clinical")
+                st.rerun()
+        if st.button("退出评审环境"):
+            clear_competition_session()
+            st.rerun()
+        return False
     st.markdown(
         f"""
         <div class='login-hero'>
@@ -4559,6 +5189,90 @@ def render_system_mode_selection_page() -> bool:
 
 
 def require_app_access() -> bool:
+    if APP_MODE_CONFIGURATION_ERROR:
+        st.error(APP_MODE_CONFIGURATION_ERROR)
+        return False
+    if is_competition_mode():
+        if (
+            st.session_state.get("competition_review_unlocked", False)
+            or st.session_state.get("competition_admin_unlocked", False)
+        ):
+            return True
+        review_code, admin_code = get_competition_auth_credentials()
+        invalid_fields = tuple(
+            name
+            for name, value in (
+                ("COMPETITION_REVIEW_CODE", review_code),
+                ("COMPETITION_ADMIN_CODE", admin_code),
+            )
+            if not value
+        )
+        render_version_corner()
+        st.markdown(
+            """
+            <div class='access-card'>
+                <div class='access-card-title'>护理急救动态分支虚拟仿真教学智能体</div>
+                <div class='access-card-desc'>比赛评审演示环境</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.info("虚拟演示数据，不代表实际研究结果。")
+        review_col, admin_col = st.columns(2, gap="large")
+        with review_col:
+            st.markdown("#### 评委体验入口")
+            submitted_review = st.text_input(
+                "评审体验码",
+                type="password",
+            )
+            if not review_code:
+                st.warning("评审体验码尚未安全配置，当前拒绝进入。")
+            if st.button(
+                "进入评审体验",
+                type="primary",
+                use_container_width=True,
+                disabled=not review_code,
+            ):
+                if credential_matches(submitted_review, review_code):
+                    st.session_state.competition_review_unlocked = True
+                    st.session_state.app_unlocked = True
+                    st.rerun()
+                else:
+                    st.error("评审体验码不正确。")
+        with admin_col:
+            st.markdown("#### 评审只读管理端")
+            submitted_admin = st.text_input(
+                "评审管理码",
+                type="password",
+            )
+            if not admin_code:
+                st.warning("评审管理码尚未安全配置，当前拒绝进入。")
+            if st.button(
+                "进入评审只读管理端",
+                use_container_width=True,
+                disabled=not admin_code,
+            ):
+                if credential_matches(submitted_admin, admin_code):
+                    try:
+                        scope = create_competition_admin_context()
+                    except AuthConfigurationError:
+                        st.error("授权签名密钥未安全配置，管理端已拒绝进入。")
+                    else:
+                        st.session_state.competition_admin_unlocked = True
+                        st.session_state.admin_unlocked = True
+                        st.session_state.admin_scope = scope
+                        st.session_state.admin_scope_type = COMPETITION_ADMIN_ROLE
+                        st.session_state.app_unlocked = True
+                        st.session_state.system_mode_selected = True
+                        st.session_state.academy_scenario_selected = True
+                        st.session_state.page = "管理员后台"
+                        st.rerun()
+                else:
+                    st.error("评审管理码不正确。")
+        if invalid_fields:
+            st.caption("缺少或无效配置：" + "、".join(invalid_fields))
+        return False
+
     access_code, _ = require_auth_credentials()
     if st.session_state.get("app_unlocked", False):
         return True
@@ -4603,7 +5317,7 @@ def render_action_history(sim: Simulator) -> None:
         )
         return
     html_rows = []
-    for row in rows[-12:]:
+    for row in reversed(rows[-12:]):
         result_html = (
             f"<div class='history-result'>{html.escape(str(row.get('结果','')))}</div>"
             if show_results
@@ -4624,6 +5338,12 @@ def render_action_history(sim: Simulator) -> None:
         "</div>",
         unsafe_allow_html=True,
     )
+    if show_results:
+        latest = rows[-1]
+        with st.expander("操作说明", expanded=False):
+            st.write(f"完整操作：{latest.get('操作', '')}")
+            if latest.get("结果"):
+                st.write(f"本次反馈：{latest.get('结果', '')}")
 
 
 def render_org_management_panel() -> None:
@@ -4659,27 +5379,61 @@ def render_org_management_panel() -> None:
 
 def render_admin_page() -> None:
     compact_header()
-    st.markdown(f"### 管理者后台｜{APP_VERSION} 推广版权限管理版")
-    _, admin_password = require_auth_credentials()
-    if not st.session_state.get("admin_unlocked", False):
-        st.caption("请输入总管理员密码或单位管理码。总管理员可维护单位管理码；单位管理员只能查看和导出本单位数据。")
-        pwd = st.text_input("管理码/管理员密码", type="password")
-        if st.button("进入管理者后台", type="primary"):
-            if credential_matches(pwd, admin_password):
-                st.session_state.admin_unlocked = True
-                st.session_state.admin_scope = create_platform_admin_context()
-                st.session_state.admin_scope_type = PLATFORM_ADMIN_ROLE
-                st.rerun()
-            else:
-                scope = find_org_scope_by_code(pwd)
-                if scope:
+    if is_competition_mode():
+        st.markdown("### 评审只读环境")
+        st.info("虚拟演示数据，不代表实际研究结果。")
+        if not st.session_state.get("admin_unlocked", False):
+            _, admin_code = get_competition_auth_credentials()
+            pwd = st.text_input("评审管理码", type="password")
+            if not admin_code:
+                st.warning("评审管理码尚未安全配置，当前拒绝进入。")
+                return
+            if st.button("进入评审只读管理端", type="primary"):
+                if credential_matches(pwd, admin_code):
+                    try:
+                        scope = create_competition_admin_context()
+                    except AuthConfigurationError:
+                        st.error("授权签名密钥未安全配置，管理端已拒绝进入。")
+                        return
                     st.session_state.admin_unlocked = True
                     st.session_state.admin_scope = scope
-                    st.session_state.admin_scope_type = str(scope.get("role", ""))
+                    st.session_state.admin_scope_type = COMPETITION_ADMIN_ROLE
+                    st.session_state.competition_admin_unlocked = True
                     st.rerun()
                 else:
-                    st.error("管理码无效或已停用。")
-        return
+                    st.error("评审管理码不正确。")
+            return
+    else:
+        st.markdown(f"### 管理者后台｜{APP_VERSION} 推广版权限管理版")
+        _, admin_password = require_auth_credentials()
+        if not st.session_state.get("admin_unlocked", False):
+            st.caption("请输入总管理员密码或单位管理码。总管理员可维护单位管理码；单位管理员只能查看和导出本单位数据。")
+            pwd = st.text_input("管理码/管理员密码", type="password")
+            if st.button("进入管理者后台", type="primary"):
+                if credential_matches(pwd, admin_password):
+                    st.session_state.admin_unlocked = True
+                    try:
+                        st.session_state.admin_scope = create_platform_admin_context()
+                    except AuthConfigurationError:
+                        st.error("授权签名密钥未安全配置，管理端已拒绝进入。")
+                        st.session_state.admin_unlocked = False
+                        return
+                    st.session_state.admin_scope_type = PLATFORM_ADMIN_ROLE
+                    st.rerun()
+                else:
+                    try:
+                        scope = find_org_scope_by_code(pwd)
+                    except AuthConfigurationError:
+                        st.error("授权签名密钥未安全配置，管理端已拒绝进入。")
+                        return
+                    if scope:
+                        st.session_state.admin_unlocked = True
+                        st.session_state.admin_scope = scope
+                        st.session_state.admin_scope_type = str(scope.get("role", ""))
+                        st.rerun()
+                    else:
+                        st.error("管理码无效或已停用。")
+            return
 
     scope = validate_authorization_context(st.session_state.get("admin_scope"))
     if scope is None:
@@ -4694,9 +5448,10 @@ def render_admin_page() -> None:
         st.session_state.admin_unlocked = False
         st.session_state.admin_scope = None
         st.session_state.admin_scope_type = ""
+        st.session_state.competition_admin_unlocked = False
         st.rerun()
 
-    if scope["role"] == PLATFORM_ADMIN_ROLE:
+    if scope["role"] == PLATFORM_ADMIN_ROLE and authorization_allows(scope, "manage"):
         render_org_management_panel()
         st.divider()
 
@@ -4704,7 +5459,9 @@ def render_admin_page() -> None:
     local_full_reports = load_full_reports_local(scope)
     local_summary_records = load_result_records_local(scope)
 
-    if database_configured():
+    if is_competition_mode():
+        st.caption("后台数据源：只读虚拟演示数据。正式数据库访问已在后端关闭。")
+    elif database_configured():
         if raw_db_rows:
             st.success("云端数据库已连接：" + db_message)
         else:
@@ -4847,25 +5604,25 @@ def render_admin_page() -> None:
     if view == "一人一行":
         if participant_analysis_records:
             st.markdown("**一人一行配对分析表预览（最近200名受试者）**")
-            st.dataframe(list(reversed(participant_analysis_records[-200:])), use_container_width=True, hide_index=True)
+            st.dataframe(_dataframe_ready_records(list(reversed(participant_analysis_records[-200:]))), use_container_width=True, hide_index=True)
         else:
             st.warning("尚未产生可配对的受试者记录。")
     elif view == "训练汇总":
         if summary_records:
             st.markdown("**训练汇总预览（最近200条）**")
-            st.dataframe(list(reversed(summary_records[-200:])), use_container_width=True, hide_index=True)
+            st.dataframe(_dataframe_ready_records(list(reversed(summary_records[-200:]))), use_container_width=True, hide_index=True)
         else:
             st.warning("尚未产生训练汇总记录。")
     elif view == "质控提示":
         if quality_records:
             st.markdown("**质控提示预览**")
-            st.dataframe(quality_records, use_container_width=True, hide_index=True)
+            st.dataframe(_dataframe_ready_records(quality_records), use_container_width=True, hide_index=True)
         else:
             st.success("当前筛选范围内未发现明显质控提示。")
     else:
         if action_detail_records:
             st.markdown("**操作明细预览（最近500条操作事件）**")
-            st.dataframe(list(reversed(action_detail_records[-500:])), use_container_width=True, hide_index=True)
+            st.dataframe(_dataframe_ready_records(list(reversed(action_detail_records[-500:]))), use_container_width=True, hide_index=True)
         else:
             st.warning("尚未产生可展开的操作明细。旧版本仅保存摘要时，可能无法展开。")
 
@@ -4917,21 +5674,22 @@ def render_epinephrine_dose_panel(sim: Simulator) -> bool:
     )
     c_ok, c_cancel = st.columns([1, 1], gap="medium")
     if c_ok.button("确认剂量并执行", type="primary", use_container_width=True):
-        result = sim.apply_epinephrine_dose(float(dose_mg), action_id=pending_id)
-        st.session_state.last_dose_feedback = (
-            str(result.get("message", ""))
-            if strategy.show_immediate_feedback
-            else ""
-        )
-        st.session_state.last_dose_feedback_level = (
-            str(result.get("status", ""))
-            if strategy.show_immediate_feedback
-            else ""
-        )
-        st.session_state.pending_dose_action_id = ""
-        st.session_state.pending_dose_action_label = ""
-        sim.tick()
-        finalize_if_done()
+        if claim_ui_event("confirm_dose", str(pending_id), sim.state.t):
+            result = sim.apply_epinephrine_dose(float(dose_mg), action_id=pending_id)
+            st.session_state.last_dose_feedback = (
+                str(result.get("message", ""))
+                if strategy.show_immediate_feedback
+                else ""
+            )
+            st.session_state.last_dose_feedback_level = (
+                str(result.get("status", ""))
+                if strategy.show_immediate_feedback
+                else ""
+            )
+            st.session_state.pending_dose_action_id = ""
+            st.session_state.pending_dose_action_label = ""
+            sim.tick()
+            finalize_if_done()
         st.rerun()
     if c_cancel.button("取消输入", use_container_width=True):
         st.session_state.pending_dose_action_id = ""
@@ -4977,21 +5735,22 @@ def render_fluid_bolus_panel(sim: Simulator) -> bool:
     )
     c_ok, c_cancel = st.columns([1, 1], gap="medium")
     if c_ok.button("确认容量并执行", type="primary", use_container_width=True):
-        result = sim.apply_fluid_bolus_volume(float(volume_ml))
-        st.session_state.last_dose_feedback = (
-            str(result.get("message", ""))
-            if strategy.show_immediate_feedback
-            else ""
-        )
-        st.session_state.last_dose_feedback_level = (
-            str(result.get("status", ""))
-            if strategy.show_immediate_feedback
-            else ""
-        )
-        st.session_state.pending_volume_action_id = ""
-        st.session_state.pending_volume_action_label = ""
-        sim.tick()
-        finalize_if_done()
+        if claim_ui_event("confirm_volume", str(pending_id), sim.state.t):
+            result = sim.apply_fluid_bolus_volume(float(volume_ml))
+            st.session_state.last_dose_feedback = (
+                str(result.get("message", ""))
+                if strategy.show_immediate_feedback
+                else ""
+            )
+            st.session_state.last_dose_feedback_level = (
+                str(result.get("status", ""))
+                if strategy.show_immediate_feedback
+                else ""
+            )
+            st.session_state.pending_volume_action_id = ""
+            st.session_state.pending_volume_action_label = ""
+            sim.tick()
+            finalize_if_done()
         st.rerun()
     if c_cancel.button("取消输入", use_container_width=True):
         st.session_state.pending_volume_action_id = ""
@@ -5038,21 +5797,22 @@ def render_steroid_dose_panel(sim: Simulator) -> bool:
     )
     c_ok, c_cancel = st.columns([1, 1], gap="medium")
     if c_ok.button("确认剂量并执行", type="primary", use_container_width=True):
-        result = sim.apply_steroid_dose(float(dose_mg))
-        st.session_state.last_dose_feedback = (
-            str(result.get("message", ""))
-            if strategy.show_immediate_feedback
-            else ""
-        )
-        st.session_state.last_dose_feedback_level = (
-            str(result.get("status", ""))
-            if strategy.show_immediate_feedback
-            else ""
-        )
-        st.session_state.pending_steroid_action_id = ""
-        st.session_state.pending_steroid_action_label = ""
-        sim.tick()
-        finalize_if_done()
+        if claim_ui_event("confirm_steroid", str(pending_id), sim.state.t):
+            result = sim.apply_steroid_dose(float(dose_mg))
+            st.session_state.last_dose_feedback = (
+                str(result.get("message", ""))
+                if strategy.show_immediate_feedback
+                else ""
+            )
+            st.session_state.last_dose_feedback_level = (
+                str(result.get("status", ""))
+                if strategy.show_immediate_feedback
+                else ""
+            )
+            st.session_state.pending_steroid_action_id = ""
+            st.session_state.pending_steroid_action_label = ""
+            sim.tick()
+            finalize_if_done()
         st.rerun()
     if c_cancel.button("取消输入", use_container_width=True):
         st.session_state.pending_steroid_action_id = ""
@@ -5065,8 +5825,9 @@ def render_steroid_dose_panel(sim: Simulator) -> bool:
 def render_prior_experience_survey() -> None:
     """Collect prior-experience items only after baseline performance is locked."""
     render_version_corner()
-    st.markdown("### 基线评估补充信息")
-    st.info("基线操作评估已完成。请继续完成以下补充信息；本部分不影响本次基线操作评分。")
+    phase_label = str(st.session_state.get("assessment_phase", "") or "基线评估")
+    st.markdown(f"### {phase_label}补充信息")
+    st.info(f"{phase_label}操作评估已完成。请继续完成以下补充信息；本部分不影响本阶段操作评分。")
     yn_options = ["", "是", "否", "不确定"]
     with st.form("baseline_post_experience_survey", clear_on_submit=False):
         c1, c2, c3 = st.columns([1, 1, 1], gap="large")
@@ -5088,7 +5849,7 @@ def render_prior_experience_survey() -> None:
             index=yn_options.index(st.session_state.get("real_case_experience", ""))
             if st.session_state.get("real_case_experience", "") in yn_options else 0,
         )
-        submitted = st.form_submit_button("提交补充信息并结束基线评估", type="primary", use_container_width=True)
+        submitted = st.form_submit_button(f"提交补充信息并完成{phase_label}", type="primary", use_container_width=True)
 
     if submitted:
         missing = []
@@ -5131,7 +5892,7 @@ def render_prior_experience_survey() -> None:
         _save_and_end_report(report, why)
         st.session_state.pending_completion_reason = ""
         st.session_state.pending_report = None
-        st.success("基线评估阶段已完成。")
+        st.success(f"{phase_label}阶段已完成。")
         st.rerun()
 
 
@@ -5175,7 +5936,272 @@ def visible_actions_for_current_state(sim: Simulator) -> List[Dict[str, Any]]:
             if aid == "prepare_steroid_antihistamine_only" and flags.get("rescue_equipment_prepared", False):
                 continue
         visible.append(action)
+    if is_academy:
+        return add_assisted_medication_choice(visible, flags)
     return visible
+
+
+def _academy_stage_report(name: str) -> Optional[Dict[str, Any]]:
+    reports = st.session_state.get("academy_stage_reports", {}) or {}
+    report = reports.get(name) if isinstance(reports, dict) else None
+    return report if isinstance(report, dict) else None
+
+
+def _start_next_academy_stage(phase: str) -> bool:
+    current_phase = str(st.session_state.get("assessment_phase", "") or "")
+    if next_academy_phase(current_phase) != str(phase):
+        return False
+    current_report_key = stage_report_key(current_phase)
+    if not current_report_key or _academy_stage_report(current_report_key) is None:
+        return False
+    if _academy_stage_report(stage_report_key(phase)) is not None:
+        return False
+
+    transition_key = "|".join(
+        (
+            str(st.session_state.get("participant_id", "") or ""),
+            current_phase,
+            str(phase),
+        )
+    )
+    transition_locks = dict(
+        st.session_state.get("academy_transition_locks", {}) or {}
+    )
+    existing_session_id = str(transition_locks.get(transition_key, "") or "")
+    if existing_session_id:
+        return bool(
+            st.session_state.get("assessment_phase") == phase
+            and st.session_state.get("session_id") == existing_session_id
+            and isinstance(st.session_state.get("active_simulator"), Simulator)
+        )
+
+    scenario_path = scenario_path_for_phase(
+        "academy",
+        phase,
+        current_academy_scenario_id(),
+    )
+    if scenario_path is None:
+        return False
+    st.session_state.assessment_phase = phase
+    workflow = workflow_for_phase(phase, "academy")
+    st.session_state.workflow_mode = workflow.get("mode", "exam")
+    st.session_state.workflow_script_role = workflow.get(
+        "script_role",
+        "academy_initial",
+    )
+    st.session_state.workflow_display = workflow.get("display", "")
+    st.session_state.mode = st.session_state.workflow_mode
+    start_simulation(
+        scenario_path,
+        st.session_state.workflow_mode,
+        -1,
+        str(st.session_state.get("participant_id", "") or "anonymous"),
+    )
+    transition_locks[transition_key] = str(
+        st.session_state.get("session_id", "") or ""
+    )
+    st.session_state.academy_transition_locks = transition_locks
+    persist_active_training_draft()
+    return True
+
+
+def _reset_academy_flow_for_new_learner() -> None:
+    if is_competition_mode():
+        setup_competition_participant("academy")
+        return
+    clear_training_draft()
+    st.session_state.profile_completed = False
+    st.session_state.active_simulator = None
+    st.session_state.active_scenario = None
+    st.session_state.ended = False
+    st.session_state.academy_flow_page = ""
+    st.session_state.academy_stage_reports = {}
+    st.session_state.academy_stage_session_ids = {}
+    st.session_state.academy_transition_locks = {}
+    st.session_state.abandoned_stage_sessions = []
+    st.session_state.participant_id = ""
+    st.session_state.participant_unique_suffix = ""
+    ensure_participant_suffix()
+
+
+def _render_module_overview(report: Dict[str, Any]) -> None:
+    modules = (score_snapshot(report).get("modules") or {})
+    if not modules:
+        return
+    st.markdown("**六维能力概览**")
+    st.dataframe(
+        [
+            {
+                "能力": value.get("name", key),
+                "得分": f"{value.get('awarded_points', 0)}/{value.get('max_points', 0)}",
+                "完成率": f"{value.get('completion_percent', 0)}%",
+            }
+            for key, value in modules.items()
+            if isinstance(value, dict)
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+def _render_stage_score_cards(report: Dict[str, Any]) -> None:
+    summary = score_snapshot(report)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("最终得分", f"{summary['score']}/{summary['max_score']}")
+    c2.metric("原始得分", summary["raw_score"])
+    c3.metric("安全扣分", summary["penalties"])
+
+
+def _render_stage_feedback(report: Dict[str, Any]) -> None:
+    summary = score_snapshot(report)
+    issues = [str(item) for item in summary["issues"]]
+    missing = [str(item) for item in summary["missing"]]
+    left, right = st.columns(2)
+    left.markdown("**关键错误行为**")
+    left.write("无" if not issues else "；".join(issues))
+    right.markdown("**需要改进的项目**")
+    right.write("无" if not missing else "；".join(missing))
+
+
+def _render_three_stage_comparison() -> None:
+    rows = []
+    for key, label in (
+        ("pretest", "课前测评"),
+        ("training", "模拟训练"),
+        ("posttest", "课后考核"),
+    ):
+        report = _academy_stage_report(key)
+        if report is None:
+            continue
+        timeline = report.get("key_timeline", {}) or {}
+        rows.append(
+            {
+                "阶段": label,
+                "得分": report.get("score", ""),
+                "安全扣分": report.get("penalties", 0),
+                "有效复评": timeline.get("reassess_count", ""),
+            }
+        )
+    if rows:
+        st.markdown("**三阶段简明对比**")
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+
+
+def render_academy_flow_page() -> None:
+    page = str(st.session_state.get("academy_flow_page", "") or "")
+    reports = st.session_state.get("academy_stage_reports", {}) or {}
+    questionnaire_completed = bool(
+        st.session_state.get("academy_post_evaluation_completed", False)
+    )
+    if page and not academy_flow_page_allowed(
+        page,
+        reports,
+        questionnaire_completed=questionnaire_completed,
+    ):
+        page = latest_allowed_academy_page(
+            reports,
+            questionnaire_completed=questionnaire_completed,
+        )
+        st.session_state.academy_flow_page = page
+        if not page:
+            return
+    if (
+        page == "questionnaire"
+        and not st.session_state.get("pending_academy_post_evaluation", False)
+    ):
+        st.session_state.academy_flow_page = "posttest_result"
+        page = "posttest_result"
+    if page == "questionnaire":
+        render_academy_post_evaluation_survey()
+        return
+    if page == "flow_complete":
+        st.success("全流程已完成")
+        st.write("问卷已提交，训练与评价数据已成功保存。")
+        c1, c2, c3 = st.columns(3)
+        if c1.button("重新体验", type="primary", use_container_width=True):
+            if is_competition_mode():
+                setup_competition_participant("academy")
+            else:
+                _reset_academy_flow_for_new_learner()
+            st.rerun()
+        if c2.button("更换学员", use_container_width=True):
+            _reset_academy_flow_for_new_learner()
+            st.rerun()
+        if c3.button("返回评审首页" if is_competition_mode() else "返回登记页", use_container_width=True):
+            if is_competition_mode():
+                clear_training_draft()
+                st.session_state.system_mode_selected = False
+                st.session_state.profile_completed = False
+                st.session_state.active_simulator = None
+                st.session_state.academy_flow_page = ""
+            else:
+                _reset_academy_flow_for_new_learner()
+            st.rerun()
+        return
+
+    report_key = {
+        "pretest_complete": "pretest",
+        "training_complete": "training",
+        "posttest_result": "posttest",
+    }.get(page, "")
+    report = _academy_stage_report(report_key)
+    if report is None:
+        st.error("未找到已保存的阶段报告，请返回登记页后重新进入。")
+        return
+
+    title = academy_completion_page_title(page)
+    st.markdown(f"### {title}")
+    st.success("数据已成功保存。")
+    if page == "posttest_result":
+        _render_three_stage_comparison()
+    _render_stage_score_cards(report)
+    _render_module_overview(report)
+    _render_stage_feedback(report)
+
+    if page == "training_complete":
+        st.write(training_completion_status_text(report))
+        st.caption("训练提示已按既有流程逐步呈现；详细教学反馈保留在完整报告中。")
+    elif page == "posttest_result":
+        st.markdown("**个性化改进建议**")
+        issues = report.get("process_safety_issues", []) or []
+        missing = report.get("critical_missing", []) or []
+        suggestions = list(dict.fromkeys([*map(str, issues), *map(str, missing)]))
+        st.write("继续巩固既有正确流程。" if not suggestions else "；".join(suggestions))
+
+    primary_label = {
+        "pretest_complete": "进入模拟训练",
+        "training_complete": "进入课后考核",
+        "posttest_result": "进入SUS及教学体验评价",
+    }[page]
+    if st.button(primary_label, type="primary", use_container_width=True):
+        if page == "posttest_result":
+            completion_marker = str(
+                (report.get("session", {}) or {}).get("completion_id", "")
+                or st.session_state.get("completion_id", "")
+            )
+            if claim_ui_event(
+                "open_questionnaire",
+                "posttest_result",
+                completion_marker,
+            ):
+                if _needs_academy_post_evaluation(
+                    report,
+                    str(st.session_state.get("end_reason", "") or "success"),
+                ):
+                    st.session_state.pending_academy_post_evaluation = True
+                    st.session_state.academy_flow_page = "questionnaire"
+                    persist_active_training_draft()
+                    st.rerun()
+                else:
+                    st.error("课后考核尚未满足既有完整完成门控，当前不能进入问卷。")
+        else:
+            next_phase = next_academy_phase(
+                str(st.session_state.get("assessment_phase", "") or "")
+            )
+            if next_phase and _start_next_academy_stage(next_phase):
+                st.rerun()
+            else:
+                st.error("未找到下一阶段病例，本阶段结果仍已保留。")
 
 
 def render_simulation() -> None:
@@ -5196,6 +6222,12 @@ def render_simulation() -> None:
         st.session_state.draft_restored_notice = ""
     if st.session_state.get("pending_prior_experience_survey", False):
         render_prior_experience_survey()
+        return
+    if (
+        current_system_mode() == "academy"
+        and st.session_state.get("academy_flow_page")
+    ):
+        render_academy_flow_page()
         return
     if st.session_state.get("pending_academy_post_evaluation", False):
         render_academy_post_evaluation_survey()
@@ -5234,7 +6266,7 @@ def render_simulation() -> None:
             st.markdown(
                 f"<div class='action-head'>"
                 f"<div class='action-title'>请选择下一步操作</div>"
-                f"<div class='action-note'>{html.escape('每次操作后自动推进 ' + str(sim.tick_seconds) + 's' if strategy.show_immediate_feedback else '')}</div>"
+                f"<div class='action-note'>{html.escape('每次操作后，' + format_time_progress(sim.tick_seconds) if strategy.show_immediate_feedback else '')}</div>"
                 f"</div>",
                 unsafe_allow_html=True,
             )
@@ -5249,7 +6281,7 @@ def render_simulation() -> None:
                     st.success(msg)
                 elif level in ["overdose", "invalid", "over"]:
                     st.error(msg)
-                elif level in ["underdose", "dose_high", "under", "not_indicated", "timing_error", "used_before_first_line"]:
+                elif level in ["underdose", "dose_high", "under", "not_indicated", "timing_error", "used_before_first_line", "role_boundary", "passive_response"]:
                     st.warning(msg)
                 else:
                     st.info(msg)
@@ -5267,8 +6299,7 @@ def render_simulation() -> None:
                 for local_index, (col, action) in enumerate(zip(row, actions[idx: idx + option_cols])):
                     full_label = display_action_label(action, sim)
                     aid = action.get("id")
-                    # V1.3.8: display complete option text instead of compact ellipsis labels.
-                    button_text = f"{idx + local_index + 1}. {full_label}"
+                    button_text = full_label
                     with col:
                         if st.button(
                             button_text,
@@ -5286,8 +6317,12 @@ def render_simulation() -> None:
                                 # V1.2.6d: once cardiac arrest is present, the immediate
                                 # next operation must be CPR. Do not open dose/volume panels
                                 # for a non-CPR choice; record terminal death directly.
-                                sim.apply_action(aid)
-                                finalize_if_done()
+                                if claim_ui_event("action", str(aid), sim.state.t):
+                                    if strategy.system_mode == "academy":
+                                        apply_academy_action(sim, str(aid))
+                                    else:
+                                        sim.apply_action(aid)
+                                    finalize_if_done()
                                 st.rerun()
                             elif aid in ("im_epinephrine", "repeat_epinephrine"):
                                 st.session_state.pending_dose_action_id = aid
@@ -5302,41 +6337,129 @@ def render_simulation() -> None:
                                 st.session_state.pending_steroid_action_label = full_label
                                 st.rerun()
                             else:
-                                sim.apply_action(aid)
-                                sim.tick()
-                                finalize_if_done()
+                                if claim_ui_event("action", str(aid), sim.state.t):
+                                    if strategy.system_mode == "academy":
+                                        action_result = apply_academy_action(
+                                            sim,
+                                            str(aid),
+                                        )
+                                    else:
+                                        sim.apply_action(aid)
+                                        action_result = {
+                                            "executed": True,
+                                            "feedback": "",
+                                        }
+                                    if action_result.get("executed", False):
+                                        if strategy.show_immediate_feedback:
+                                            st.session_state.last_dose_feedback = str(
+                                                action_result.get("feedback", "") or ""
+                                            )
+                                            st.session_state.last_dose_feedback_level = (
+                                                "role_boundary"
+                                                if aid
+                                                == "student_independent_epinephrine"
+                                                else (
+                                                    "passive_response"
+                                                    if aid == "watch_only"
+                                                    else ""
+                                                )
+                                            )
+                                        sim.tick()
+                                        finalize_if_done()
                                 st.rerun()
 
             render_action_history(sim)
 
             st.divider()
             c1, c2, c3 = st.columns([1.0, 1.35, 1.95], gap="medium")
-            if c1.button(f"时间流逝 {sim.tick_seconds}s", use_container_width=True):
-                sim.tick()
-                finalize_if_done()
+            if c1.button(format_time_progress(sim.tick_seconds), use_container_width=True):
+                if claim_ui_event("advance_time", "", sim.state.t):
+                    sim.tick()
+                    finalize_if_done()
                 st.rerun()
 
             if not strategy.allow_manual_completion:
-                c2.button("考试模式需按流程完成", type="primary", use_container_width=True, disabled=True)
-                c3.caption("学院课前/课后考试模式已锁定：需完成情景核心节点后系统自动结束，避免提前结束或提前进入SUS。")
+                c2.button("本阶段自动结束", type="primary", use_container_width=True, disabled=True)
+                c3.caption("完成必要评估与处置后，系统将结束本阶段。")
             else:
-                if c2.button("我已确认完成抢救", type="primary", use_container_width=True):
-                    if hasattr(sim, "mark_manual_rescue_completion"):
-                        sim.mark_manual_rescue_completion()
-                    report = enrich_report(sim.build_report(), end_reason="participant_confirmed_rescue_complete")
-                    if _needs_baseline_post_survey("participant_confirmed_rescue_complete"):
-                        st.session_state.baseline_performance_completed = True
-                        st.session_state.pending_prior_experience_survey = True
-                        st.session_state.pending_completion_reason = "participant_confirmed_rescue_complete"
-                        st.session_state.pending_report = report
-                        st.session_state.last_report = report
-                    else:
-                        if st.session_state.get("assessment_phase") == "基线评估":
-                            st.session_state.baseline_stage_completed = True
-                        _save_and_end_report(report, "participant_confirmed_rescue_complete")
+                done, why = sim.is_done()
+                is_academy_training = (
+                    strategy.system_mode == "academy"
+                    and st.session_state.get("assessment_phase") == "模拟训练"
+                )
+                training_ready = academy_training_ready_for_manual_completion(
+                    st.session_state.get("assessment_phase", ""),
+                    sim.mode,
+                    done,
+                    why,
+                )
+                confirmation_pending = bool(
+                    st.session_state.get("manual_completion_confirmation", False)
+                )
+                if not confirmation_pending and c2.button(
+                    "我已确认完成抢救",
+                    type="primary",
+                    use_container_width=True,
+                    disabled=is_academy_training and not training_ready,
+                ):
+                    st.session_state.manual_completion_confirmation = True
                     st.rerun()
-                if strategy.show_immediate_feedback:
-                    c3.caption("可点击确认完成抢救结束当前阶段；未完成标准步骤按0分统计。")
+                if confirmation_pending:
+                    if is_academy_training:
+                        c3.warning(
+                            "确认结束本次模拟训练？\n\n"
+                            "结束后将保存本阶段训练结果，并进入课后考核入口。"
+                        )
+                    else:
+                        c3.warning("确认结束本阶段吗？未完成的核心步骤将不计分。")
+                    continue_col, confirm_col = st.columns(2, gap="small")
+                    cancelled = continue_col.button(
+                        "继续操作",
+                        use_container_width=True,
+                    )
+                    confirmed = confirm_col.button(
+                        "确认结束",
+                        type="primary",
+                        use_container_width=True,
+                    )
+                    if cancelled:
+                        st.session_state.manual_completion_confirmation = False
+                        st.rerun()
+                    if confirmed:
+                        st.session_state.manual_completion_confirmation = False
+                        if claim_ui_event(
+                            "confirm_manual_completion",
+                            "",
+                            sim.state.t,
+                        ):
+                            if hasattr(sim, "mark_manual_rescue_completion"):
+                                sim.mark_manual_rescue_completion()
+                            report = enrich_report(
+                                sim.build_report(),
+                                end_reason="participant_confirmed_rescue_complete",
+                            )
+                            if _needs_baseline_post_survey(
+                                "participant_confirmed_rescue_complete"
+                            ):
+                                st.session_state.baseline_performance_completed = True
+                                st.session_state.pending_prior_experience_survey = True
+                                st.session_state.pending_completion_reason = (
+                                    "participant_confirmed_rescue_complete"
+                                )
+                                st.session_state.pending_report = report
+                                st.session_state.last_report = report
+                            else:
+                                if st.session_state.get("assessment_phase") == "基线评估":
+                                    st.session_state.baseline_stage_completed = True
+                                _save_and_end_report(
+                                    report,
+                                    "participant_confirmed_rescue_complete",
+                                )
+                        st.rerun()
+                elif is_academy_training and not training_ready:
+                    c3.caption("完成必要评估与处置后，可手动确认结束本阶段。")
+                elif strategy.show_immediate_feedback:
+                    c3.caption("结束本阶段前需要再次确认；未完成标准步骤按0分统计。")
 
 
 RESULT_END_REASON_LABELS = {
@@ -5426,11 +6549,14 @@ def render_report() -> None:
         ])
     st.success(f"情景结束：{result_context['completion_label']}")
     session_meta = report.get("session", {}) or {}
-    st.caption(
-        f"参与者：{session_meta.get('participant_id', '')}｜单位：{session_meta.get('institution', '')}"
-        f"｜院区：{session_meta.get('campus', '')}｜科室：{session_meta.get('department', '')}"
-        f"｜层级：{session_meta.get('nurse_level', '')}｜Session：{session_meta.get('session_id', '')}"
-    )
+    if is_competition_mode():
+        st.caption("评审学员-001｜虚拟演示记录")
+    else:
+        st.caption(
+            f"参与者：{session_meta.get('participant_id', '')}｜单位：{session_meta.get('institution', '')}"
+            f"｜院区：{session_meta.get('campus', '')}｜科室：{session_meta.get('department', '')}"
+            f"｜层级：{session_meta.get('nurse_level', '')}｜会话编号：{session_meta.get('session_id', '')}"
+        )
     if st.session_state.get("last_db_save_message"):
         if st.session_state.get("last_db_save_ok"):
             st.success(st.session_state.get("last_db_save_message"))
@@ -5438,7 +6564,7 @@ def render_report() -> None:
             st.warning(st.session_state.get("last_db_save_message"))
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("结束时间", f"{report.get('end_time_seconds')}s")
+    c1.metric("结束时间", format_elapsed_time(report.get("end_time_seconds", 0)))
     c2.metric("最终分级", report.get("final_grade", ""))
     c3.metric("得分", f"{report.get('score')}/{report.get('max_score')}")
     c4.metric("扣分", report.get("penalties", 0))
@@ -5460,7 +6586,7 @@ def render_report() -> None:
         st.markdown("**关键时间轴**")
         timeline = report.get("key_timeline", {})
         st.table([
-            {"指标": k, "时间/次数": "" if v is None else str(v)}
+            {"指标": k, "时间/次数": format_timeline_value(k, v)}
             for k, v in timeline.items()
         ])
     with right:
@@ -5474,13 +6600,14 @@ def render_report() -> None:
         if unfinished:
             st.write("主动确认完成时未完成步骤：" + "、".join(map(str, unfinished)))
 
-        st.download_button(
-            "下载本次 JSON 报告",
-            data=get_report_download(report),
-            file_name=f"{st.session_state.session_id}_report.json",
-            mime="application/json",
-            use_container_width=True,
-        )
+        if not is_competition_mode():
+            st.download_button(
+                "下载本次 JSON 报告",
+                data=get_report_download(report),
+                file_name=f"{st.session_state.session_id}_report.json",
+                mime="application/json",
+                use_container_width=True,
+            )
 
     if (
         result_context["result_page_behavior"]
@@ -5493,9 +6620,10 @@ def render_report() -> None:
         else:
             st.info("当前报告未记录独立的关键操作计分明细；总分、模块评分和问题汇总仍按现有报告展示。")
 
-    st.session_state.show_raw_log = st.checkbox("显示完整操作日志", value=st.session_state.show_raw_log)
-    if st.session_state.show_raw_log:
-        st.json(report.get("log", []))
+    if not is_competition_mode():
+        st.session_state.show_raw_log = st.checkbox("显示完整操作日志", value=st.session_state.show_raw_log)
+        if st.session_state.show_raw_log:
+            st.json(report.get("log", []))
 
     if (
         result_context["result_page_behavior"]
@@ -5510,11 +6638,33 @@ def render_report() -> None:
                 st.rerun()
             else:
                 st.error("后续流程暂时无法打开，本次训练结果仍已保留，请稍后重试。")
-        if restart_col.button("重新开始本阶段", use_container_width=True):
-            if restart_completed_clinical_stage():
+        if (
+            not st.session_state.get("restart_stage_confirmation", False)
+            and restart_col.button("重新开始本阶段", use_container_width=True)
+        ):
+            st.session_state.restart_stage_confirmation = True
+            persist_active_training_draft()
+            st.rerun()
+        if st.session_state.get("restart_stage_confirmation", False):
+            st.warning("确认重新开始本阶段？当前阶段已执行操作将被清除。")
+            keep_col, confirm_col = st.columns(2, gap="small")
+            if keep_col.button("继续当前阶段", use_container_width=True):
+                st.session_state.restart_stage_confirmation = False
+                persist_active_training_draft()
                 st.rerun()
-            else:
-                st.error("未找到当前病例文件，本次结果仍已保留。")
+            if confirm_col.button(
+                "确认重新开始",
+                type="primary",
+                use_container_width=True,
+            ):
+                if claim_ui_event(
+                    "restart_completed_stage",
+                    "",
+                    st.session_state.get("session_id", ""),
+                ) and restart_completed_clinical_stage():
+                    st.rerun()
+                else:
+                    st.error("未找到当前病例文件，本次结果仍已保留。")
         if home_col.button("返回首页", use_container_width=True):
             return_home_after_clinical_result()
             st.rerun()

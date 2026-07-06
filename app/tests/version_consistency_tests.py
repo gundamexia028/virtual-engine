@@ -5,7 +5,6 @@ import hashlib
 import json
 from pathlib import Path
 import sys
-import tomllib
 import unittest
 
 from streamlit.testing.v1 import AppTest
@@ -75,7 +74,7 @@ class VersionConsistencyTests(unittest.TestCase):
     def test_page_version_displays_use_app_version(self):
         source = (ROOT / "streamlit_app.py").read_text(encoding="utf-8")
         self.assertIn("版本：{html.escape(APP_VERSION)}", source)
-        self.assertIn('st.sidebar.title(f"{APP_VERSION} 控制台")', source)
+        self.assertIn('f"{APP_VERSION} 控制台"', source)
         self.assertIn("管理者后台｜{APP_VERSION} 推广版权限管理版", source)
         self.assertNotIn("V1.3.3 控制台", source)
         self.assertNotIn("管理者后台｜V1.3.4", source)
@@ -98,10 +97,17 @@ class VersionConsistencyTests(unittest.TestCase):
             self.assertEqual(payload["schema_version"], 1)
 
     def test_local_app_smoke_shows_aligned_version_and_mode_entries(self):
-        access_code = tomllib.loads(
-            (ROOT / ".streamlit/secrets.toml").read_text(encoding="utf-8")
-        )["APP_ACCESS_CODE"]
-        app = AppTest.from_file(str(ROOT / "streamlit_app.py"), default_timeout=15).run()
+        access_code = "AUTO-VERSION-ACCESS-7F3B"
+        app = AppTest.from_file(str(ROOT / "streamlit_app.py"), default_timeout=15)
+        app.secrets.update(
+            {
+                "APP_MODE": "production",
+                "APP_ACCESS_CODE": access_code,
+                "ADMIN_PASSWORD": "AUTO-VERSION-ADMIN-9C2D",
+                "AUTH_CONTEXT_SIGNING_KEY": "AUTO-TEST-SIGNING-KEY-ONLY-7F3B9C2D6E1A",
+            }
+        )
+        app.run()
         version_markdown = [
             item.value
             for item in app.markdown

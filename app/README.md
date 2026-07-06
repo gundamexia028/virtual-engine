@@ -28,7 +28,8 @@
 ## 三、当前流程
 
 ```text
-输入访问码
+APP_MODE=production（默认）
+输入正式访问码
 ↓
 选择模式
 ├── 临床模式
@@ -40,7 +41,17 @@
         ↓
         在校护生信息登记
         ↓
-        课前测评 / 模拟训练 / 课后考核
+        课前测评完成页
+        → 模拟训练完成页
+        → 课后考核结果页
+        → SUS及教学体验评价
+        → 全流程完成页
+
+APP_MODE=competition
+评审体验码 / 评审只读管理码
+├── 学院教学完整体验（默认）
+├── 临床模式演示
+└── 只读虚拟演示后台
 ```
 
 ## 四、运行方式
@@ -54,6 +65,16 @@ streamlit run streamlit_app.py
 `APP_ACCESS_CODE` 和 `ADMIN_PASSWORD`。项目不提供默认访问码或默认管理员密码，
 请勿将本地 Secrets 提交到版本控制。
 
+运行模式通过 `APP_MODE` 统一配置，允许值为 `production` 和 `competition`，
+默认是 `production`。配置优先级为 Streamlit Secrets、环境变量、默认值。
+旧 `PEDSIM_PUBLIC_REVIEW_MODE=true` 仅保留为弃用兼容项。
+
+competition 部署还必须配置互不相同的 `COMPETITION_REVIEW_CODE`、
+`COMPETITION_ADMIN_CODE` 和不少于32个字符的 `AUTH_CONTEXT_SIGNING_KEY`。
+评审体验写入独立的 `PEDSIM_COMPETITION_RESULTS_DIR`（未配置时为
+`app/competition_runtime/`）；评审只读后台只读取 `app/demo_data/` 的纯虚构数据，
+不会读取正式 `runs_web` 或连接 Supabase。
+
 ## 五、文件结构
 
 ```text
@@ -65,16 +86,32 @@ docs/
   V1.3.3_academy_scenario_library_update.md
 peds_anaphylaxis_sim/
   engine.py
+  time_format.py
   scenarios/
     peds_ward_anaphylaxis_iv_initial.json
     peds_ward_anaphylaxis_iv_variantA.json
     peds_ward_allergy_academy_initial.json
     peds_ward_allergy_academy_variant.json
 streamlit_app.py
+runtime_config.py
+storage_adapters.py
+academy_flow.py
+academy_interactions.py
+ui_labels.py
+demo_data/
 requirements.txt
 README.md
 tests/
 ```
+
+候选版统一验证：
+
+```powershell
+.\working\V1.3.8_dev\.venv\Scripts\python.exe scripts\verify_competition_candidate.py
+```
+
+入口、权限、数据与双App部署边界见根目录
+`docs/ENTRY_FLOW_SPEC.md`。
 
 ## 六、使用提醒
 
@@ -82,6 +119,7 @@ tests/
 - 学院模式采用“情景库”结构，但当前只开放过敏性休克抢救情景，不急于扩展其他场景。
 - 学院模式不用于评价护生独立完成完整临床抢救的能力，而是评价其识别、停药、呼救、给氧监测、抢救配合、复评、沟通与汇报能力。
 - 两类数据通过 `system_mode` 字段区分；学院模式内部通过 `academy_scenario_id` 区分不同教学情景。
+- competition 与 production 的账号、管理权限、读路径、写路径和界面呈现互相隔离；演示数据不代表实际研究结果。
 
 ## 七、声明
 

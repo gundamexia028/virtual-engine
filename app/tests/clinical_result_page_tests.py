@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 import sys
 import tempfile
-import tomllib
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -220,19 +219,23 @@ class ClinicalResultPageTests(unittest.TestCase):
         self.assertEqual(fake.session_state.last_report["score"], report["score"])
         self.assertIsNotNone(fake.session_state.active_simulator)
 
-    def test_academy_training_completion_behavior_is_unchanged(self):
-        fake = self._start(system_mode="academy", mode="coach", phase="模拟教学")
+    def test_academy_training_completion_enters_stage_completion_page(self):
+        fake = self._start(system_mode="academy", mode="coach", phase="模拟训练")
         self._complete(fake, self._report(fake))
-        self.assertFalse(fake.session_state.profile_completed)
-        self.assertIsNone(fake.session_state.active_simulator)
-        self.assertFalse(fake.session_state.ended)
+        self.assertTrue(fake.session_state.profile_completed)
+        self.assertIsNotNone(fake.session_state.active_simulator)
+        self.assertTrue(fake.session_state.ended)
+        self.assertEqual(fake.session_state.academy_flow_page, "training_complete")
+        self.assertIn("training", fake.session_state.academy_stage_reports)
 
-    def test_academy_exam_completion_behavior_is_unchanged(self):
+    def test_academy_pretest_completion_enters_stage_completion_page(self):
         fake = self._start(system_mode="academy", mode="exam", phase="课前测评")
         self._complete(fake, self._report(fake), "standard_assessment_completed")
-        self.assertFalse(fake.session_state.profile_completed)
-        self.assertIsNone(fake.session_state.active_simulator)
-        self.assertFalse(fake.session_state.ended)
+        self.assertTrue(fake.session_state.profile_completed)
+        self.assertIsNotNone(fake.session_state.active_simulator)
+        self.assertTrue(fake.session_state.ended)
+        self.assertEqual(fake.session_state.academy_flow_page, "pretest_complete")
+        self.assertIn("pretest", fake.session_state.academy_stage_reports)
 
     def test_result_context_uses_existing_report_fields(self):
         fake = self._start(mode="coach")
@@ -255,10 +258,20 @@ class ClinicalResultPageTests(unittest.TestCase):
         self.assertFalse((self.temp_path / "training_full_reports.jsonl").exists())
 
     def test_streamlit_ui_clinical_training_reaches_complete_result_page(self):
-        access_code = tomllib.loads(
-            (ROOT / ".streamlit" / "secrets.toml").read_text(encoding="utf-8")
-        )["APP_ACCESS_CODE"]
-        app_test = AppTest.from_file(str(ROOT / "streamlit_app.py"), default_timeout=20).run()
+        access_code = "AUTO-RESULT-ACCESS-5A7C"
+        app_test = AppTest.from_file(
+            str(ROOT / "streamlit_app.py"),
+            default_timeout=20,
+        )
+        app_test.secrets.update(
+            {
+                "APP_MODE": "production",
+                "APP_ACCESS_CODE": access_code,
+                "ADMIN_PASSWORD": "AUTO-RESULT-ADMIN-8D4E",
+                "AUTH_CONTEXT_SIGNING_KEY": "AUTO-TEST-SIGNING-KEY-ONLY-5A7C8D4E2B9F",
+            }
+        )
+        app_test.run()
         app_test.text_input[0].input(access_code)
         app_test.button[0].click().run()
 
