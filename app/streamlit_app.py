@@ -173,6 +173,8 @@ DRAFT_QUERY_KEY = "resume"
 DRAFT_TTL_SECONDS = 12 * 60 * 60
 DRAFT_MAX_BYTES = 5 * 1024 * 1024
 APP_VERSION = SYSTEM_VERSION
+# Review hotfix: display-only bedside monitor refresh; does not advance Simulator state.
+CLINICAL_REVIEW_LIVE_VITALS_REFRESH_SECONDS = 2.0
 AUTH_CONTEXT_ERROR_MESSAGE = "当前管理权限无效或已失效，请重新登录。"
 PLATFORM_ADMIN_ROLE = "platform_admin"
 UNIT_ADMIN_ROLES = {"clinical_admin", "academy_admin"}
@@ -1019,6 +1021,120 @@ def visible_vitals(sim: Simulator) -> Dict[str, str]:
         out.update({"SpO₂": "未连接监护", "HR": "未连接监护", "RR": "未连接监护"})
     if f.get("bp_checked", False):
         out["BP"] = f"{v.get('SBP', 0):.0f}/{v.get('DBP', 0):.0f} mmHg"
+    else:
+        out["BP"] = "未测量"
+    return out
+
+
+
+def _review_live_vital_pattern_value(bucket: int, metric: str) -> int:
+    """Small deterministic bedside-monitor offset used only for UI display."""
+    patterns = {
+        "SpO2": (0, -1, 0, 1, 0, -1, 0, 1),
+        "HR": (-1, 1, 0, 2, -2, 1, 0, -1),
+        "RR": (0, 1, 0, -1, 1, 0, -1, 0),
+        "SBP": (0, 1, -1, 2, 0, -2, 1, 0),
+        "DBP": (0, 1, 0, -1, 1, 0, -1, 0),
+    }
+    pattern = patterns[metric]
+    session_id = str(st.session_state.get("session_id", "") or "review-clinical-live")
+    digest = hashlib.sha256(f"{session_id}:{metric}".encode("utf-8")).digest()
+    phase = digest[0] % len(pattern)
+    return int(pattern[(int(bucket) + phase) % len(pattern)])
+
+
+def live_display_vitals(sim: Simulator, bucket: Optional[int] = None) -> Dict[str, str]:
+    """Return review-mode monitor values with UI-only physiologic variation.
+
+    Clinical and academy modes both receive small bedside-monitor display changes.
+    The function never mutates ``sim.state``: disease evolution, elapsed scenario
+    time, scoring, reports and exported research/review data remain unchanged.
+    """
+    try:
+        system_mode = current_flow_strategy(sim).system_mode
+    except Exception:
+        system_mode = current_system_mode()
+    if system_mode not in {"clinical", "academy"}:
+        return visible_vitals(sim)
+
+    f = sim.state.flags
+    if f.get("dead", False) or (
+        f.get("cardiac_arrest", False) and not f.get("resuscitation_rosc", False)
+    ):
+        return visible_vitals(sim)
+
+    if bucket is None:
+        bucket = int(time.monotonic() // CLINICAL_REVIEW_LIVE_VITALS_REFRESH_SECONDS)
+
+    v = sim.state.vitals
+    out = {"体温": f"{v.get('Temp', 0):.1f} ℃"}
+
+    if f.get("monitor_on", False):
+        spo2 = max(
+            40,
+            min(
+                100,
+                round(float(v.get("SpO2", 0)) + _review_live_vital_pattern_value(bucket, "SpO2")),
+            ),
+        )
+        hr = max(
+            40,
+            min(
+                220,
+                round(float(v.get("HR", 0)) + _review_live_vital_pattern_value(bucket, "HR")),
+            ),
+        )
+        if f.get("resuscitation_rosc", False):
+            out.update(
+                {
+                    "SpO₂": f"{spo2:.0f} %（波形恢复）",
+                    "HR": f"{hr:.0f} /min（可触及脉搏）",
+                    "RR": "人工通气支持",
+                }
+            )
+        else:
+            rr = max(
+                5,
+                min(
+                    80,
+                    round(float(v.get("RR", 0)) + _review_live_vital_pattern_value(bucket, "RR")),
+                ),
+            )
+            out.update(
+                {
+                    "SpO₂": f"{spo2:.0f} %",
+                    "HR": f"{hr:.0f} /min",
+                    "RR": f"{rr:.0f} /min",
+                }
+            )
+    else:
+        if f.get("resuscitation_rosc", False):
+            out.update(
+                {"SpO₂": "未连接监护", "HR": "未连接监护", "RR": "人工通气支持"}
+            )
+        else:
+            out.update(
+                {"SpO₂": "未连接监护", "HR": "未连接监护", "RR": "未连接监护"}
+            )
+
+    if f.get("bp_checked", False):
+        # BP refreshes more slowly than HR/RR/SpO2 while remaining display-only.
+        bp_bucket = int(bucket) // 3
+        sbp = max(
+            30,
+            min(
+                160,
+                round(float(v.get("SBP", 0)) + _review_live_vital_pattern_value(bp_bucket, "SBP")),
+            ),
+        )
+        dbp = max(
+            20,
+            min(
+                110,
+                round(float(v.get("DBP", 0)) + _review_live_vital_pattern_value(bp_bucket, "DBP")),
+            ),
+        )
+        out["BP"] = f"{sbp:.0f}/{dbp:.0f} mmHg"
     else:
         out["BP"] = "未测量"
     return out
@@ -4769,7 +4885,15 @@ def render_top_status(sim: Simulator, changes: Dict[str, Any]) -> None:
     )
 
 
-def render_patient_status(sim: Simulator, scenario: Dict[str, Any], changes: Dict[str, Any]) -> None:
+
+def _render_patient_status_body(
+    sim: Simulator,
+    scenario: Dict[str, Any],
+    changes: Dict[str, Any],
+    *,
+    live_monitor: bool = False,
+    direct_html: bool = False,
+) -> None:
     patient = scenario.get("patient", {})
     patient_meta = (
         f"{patient.get('setting','')}｜{patient.get('age_years','')}岁｜"
@@ -4797,10 +4921,15 @@ def render_patient_status(sim: Simulator, scenario: Dict[str, Any], changes: Dic
         )
     symptom_now = symptoms_text(sim)
     changed_vitals: Set[str] = changes.get("vitals", set()) or set()
-    any_clinical_change = bool(changes.get("symptoms")) or bool(changes.get("clinical")) or bool(changed_vitals)
+    any_clinical_change = (
+        bool(changes.get("symptoms"))
+        or bool(changes.get("clinical"))
+        or bool(changed_vitals)
+    )
 
     vital_cards = []
-    for key, value in visible_vitals(sim).items():
+    display_vitals = live_display_vitals(sim) if live_monitor else visible_vitals(sim)
+    for key, value in display_vitals.items():
         cls = "vital-card" + vital_severity_class(sim, key) + flash_class(key in changed_vitals)
         vital_cards.append(
             f"<div class='{cls}'>"
@@ -4818,10 +4947,11 @@ def render_patient_status(sim: Simulator, scenario: Dict[str, Any], changes: Dic
             changed_names.append("临床表现")
         if changed_vitals:
             changed_names.append("生命体征")
-        banner = f"<div class='change-banner flash'>{' / '.join(changed_names)} 状态已更新。</div>"
+        banner = (
+            f"<div class='change-banner flash'>{' / '.join(changed_names)} 状态已更新。</div>"
+        )
 
-    st.markdown(
-        f"""
+    panel_html = f"""
         <div class='patient-panel'>
             <div class='patient-head'>
                 <div class='patient-title'>病例与实时状态</div>
@@ -4836,9 +4966,98 @@ def render_patient_status(sim: Simulator, scenario: Dict[str, Any], changes: Dic
             <div class='vital-grid'>{''.join(vital_cards)}</div>
             {banner}
         </div>
-        """,
-        unsafe_allow_html=True,
+    """
+    if direct_html:
+        # Clinical review hotfix: bypass Markdown parsing so an empty academy_context
+        # cannot turn the following HTML into a visible code block.
+        st.html(panel_html)
+    else:
+        # Preserve the academy rendering path exactly as before.
+        st.markdown(panel_html, unsafe_allow_html=True)
+
+
+@st.fragment(run_every=CLINICAL_REVIEW_LIVE_VITALS_REFRESH_SECONDS)
+def _render_clinical_patient_status_fragment(
+    sim: Simulator,
+    scenario: Dict[str, Any],
+    changes: Dict[str, Any],
+) -> None:
+    """Refresh clinical bedside display only; never call Simulator.tick()."""
+    marker = (
+        str(st.session_state.get("session_id", "") or ""),
+        int(getattr(sim.state, "t", 0) or 0),
+        len(getattr(sim, "log", []) or []),
     )
+    last_marker = st.session_state.get("_review_live_fragment_marker")
+    fragment_changes = changes
+    if last_marker == marker:
+        # Suppress repeated flash animation on timer-only fragment reruns.
+        fragment_changes = {
+            "clinical": False,
+            "symptoms": False,
+            "score": False,
+            "reassess": False,
+            "vitals": set(),
+        }
+    else:
+        st.session_state["_review_live_fragment_marker"] = marker
+    _render_patient_status_body(
+        sim,
+        scenario,
+        fragment_changes,
+        live_monitor=True,
+        direct_html=True,
+    )
+
+
+@st.fragment(run_every=CLINICAL_REVIEW_LIVE_VITALS_REFRESH_SECONDS)
+def _render_academy_patient_status_fragment(
+    sim: Simulator,
+    scenario: Dict[str, Any],
+    changes: Dict[str, Any],
+) -> None:
+    """Refresh academy bedside display only; never call Simulator.tick()."""
+    marker = (
+        "academy",
+        str(st.session_state.get("session_id", "") or ""),
+        int(getattr(sim.state, "t", 0) or 0),
+        len(getattr(sim, "log", []) or []),
+    )
+    last_marker = st.session_state.get("_review_academy_live_fragment_marker")
+    fragment_changes = changes
+    if last_marker == marker:
+        fragment_changes = {
+            "clinical": False,
+            "symptoms": False,
+            "score": False,
+            "reassess": False,
+            "vitals": set(),
+        }
+    else:
+        st.session_state["_review_academy_live_fragment_marker"] = marker
+    _render_patient_status_body(
+        sim,
+        scenario,
+        fragment_changes,
+        live_monitor=True,
+        direct_html=True,
+    )
+
+
+def render_patient_status(sim: Simulator, scenario: Dict[str, Any], changes: Dict[str, Any]) -> None:
+    system_mode = current_flow_strategy(sim).system_mode
+    if system_mode == "clinical":
+        _render_clinical_patient_status_fragment(sim, scenario, changes)
+    elif system_mode == "academy":
+        _render_academy_patient_status_fragment(sim, scenario, changes)
+    else:
+        _render_patient_status_body(
+            sim,
+            scenario,
+            changes,
+            live_monitor=False,
+            direct_html=False,
+        )
 
 
 def render_intro() -> None:

@@ -30,6 +30,7 @@ if "streamlit" not in sys.modules:
         secrets={},
         cache_resource=_cache_passthrough,
         cache_data=_cache_passthrough,
+        fragment=_cache_passthrough,
     )
 
 
