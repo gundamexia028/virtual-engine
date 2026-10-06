@@ -1,3 +1,7 @@
+# Virtual-Engine — 1.3.9-audit.2
+
+五项已确认流程缺陷的独立补丁候选，尚未提交或部署。当前说明和结果以 [补丁说明](audit/PATCH_1.3.9-audit.2.zh-CN.md) 与 audit/patch_acceptance_status.json 为准。源码基线为已部署提交 4a3e619b1287ecc16b5a9a9f80e82fea9502d39d；下方保留 audit.1 历史交接状态，不代表 audit.2 最新测试结果。
+
 # Virtual-Engine — 1.3.9-audit.1
 
 **交付状态：完整修复候选仓库；HOLD，未完成真实浏览器及真实 Streamlit 运行时验收。禁止据此直接覆盖线上。**

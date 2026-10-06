@@ -1,5 +1,10 @@
 # CURRENT_STATUS.md
 
+## 当前补丁状态
+
+C01–C05 收口详见 `audit/PATCH_1.3.9-audit.2.zh-CN.md`（docs 下为 `../audit/`）。补丁未提交、未部署，最终验证见 `audit/patch_acceptance_status.json`。下方为原有历史记录，保留不改写。
+
+
 ## 1. 状态更新时间
 
 更新时间：2026-07-04

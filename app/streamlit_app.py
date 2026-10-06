@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-护理动态分支虚拟仿真训练平台｜V1.3.9-audit.1 offline repair candidate
+护理动态分支虚拟仿真训练平台｜V1.3.9-audit.2 offline repair candidate
 
 本版重点：
 - 时间/分级/得分/复评移至左侧病例下方的运行信息区；
@@ -6424,6 +6424,8 @@ def render_simulation() -> None:
                     done,
                     why,
                 )
+                if is_academy_training and training_ready:
+                    c3.info("本次训练已完成，成绩与病程已锁定。可返回查看操作记录；如需重新练习，请重新开始本阶段。")
                 confirmation_pending = bool(
                     st.session_state.get("manual_completion_confirmation", False)
                 )
@@ -6445,7 +6447,7 @@ def render_simulation() -> None:
                         c3.warning("确认结束本阶段吗？未完成的核心步骤将不计分。")
                     continue_col, confirm_col = st.columns(2, gap="small")
                     cancelled = continue_col.button(
-                        "继续操作",
+                        "返回查看" if done else "继续操作",
                         use_container_width=True,
                     )
                     confirmed = confirm_col.button(

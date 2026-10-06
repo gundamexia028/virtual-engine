@@ -1402,7 +1402,12 @@ class Simulator:
             return
 
         repeatable = {"stop_infusion", "check_bp", "advanced_support", "cpr", "reassess_first",
-                      "reassess_second", "family_explain", "sbar_handoff", "establish_iv"}
+                      "reassess_second", "academy_reassess", "family_explain", "sbar_handoff", "establish_iv"}
+        # A clinical restart is a new exposure transition, not repeat treatment.
+        # Re-clicking while already running retains the one-shot protection.
+        if (action_id == "continue_infusion" and not self._is_academy_basic_case()
+                and self.state.flags.get("stopped_infusion", False)):
+            repeatable.add("continue_infusion")
         one_shot_done = action_id in self.action_valid_time and action_id not in repeatable
         if one_shot_done:
             self._log("action", action_id, {"status": "already_completed", "gained": 0,
@@ -2170,7 +2175,8 @@ class Simulator:
             return True, "standard_assessment_completed"
 
         try:
-            if safe_eval(succ, ctx) and (self.state.t >= self.min_time_for_success):
+            if (safe_eval(succ, ctx) and self.state.t >= self.min_time_for_success
+                    and not self._unfinished_required_steps()):
                 return True, "success"
         except Exception:
             pass
@@ -2221,6 +2227,12 @@ class Simulator:
                 issues.append("曾选择继续观察/暂不改变输入，属于延迟去除可疑诱因或低估病情")
             if harmful and not any("不恰当选项" in x for x in issues):
                 issues.append("本次流程曾选择不恰当选项，已计入学院模式安全扣分")
+            # Preserve historical ordering defects even after missing steps are remedied.
+            for action_id, violation in (f.get("order_violations", {}) or {}).items():
+                action = self._find_action(action_id) or {}
+                label = action.get("label", action_id)
+                recovery = "后已补救，仍需复盘" if action_id in self.action_valid_time else "尚未有效补救"
+                issues.append(f"流程顺序违规：{label}（{recovery}）：{violation.get('reason', '')}")
             return issues
         if not f.get("stopped_infusion", False):
             issues.append("未停用可疑药物/输液")
