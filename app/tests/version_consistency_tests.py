@@ -14,8 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-SYSTEM_VERSION = "V1.3.9-audit.2"
-PACKAGE_VERSION = "1.3.9-audit.2"
+SYSTEM_VERSION = "V1.3.9-audit.3"
+PACKAGE_VERSION = "1.3.9-audit.3"
 
 HISTORICAL_FILE_HASHES = {
     "docs/V1.2.11_research_collection_locked_notes.md": "195b5f68e8aff707462f2414f34f06f995e7eb34b45e6b74e09c3a028d86a343",

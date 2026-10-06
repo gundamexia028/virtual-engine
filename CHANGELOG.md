@@ -1,5 +1,10 @@
 # CHANGELOG.md
 
+## V1.3.9-audit.3（2026-10-06，演示评审候选）
+
+当前：身份切换、阶段显示、存储中断、问卷校验与报告事件修复。只修改隔离副本，不改数据库schema、情景JSON、临床参数或历史记录。独立审查、94项聚合测试、16个旧有真实运行时脚本及11768探针/68分支见证通过；本地Chromium受socket权限阻断，增强CI浏览器和四轮人工式演示验收待完成，结果以 `audit/audit3_acceptance_status.json` 和 `audit/PATCH_1.3.9-audit.3.zh-CN.md` 为准（docs下相对路径为 `../audit/`）。r3增加动作区域自然换行、中文/单位展示和competition临床既定三阶段显式续接；生产采集流程不变。下方保留历史记录，不代表当前验收结果。
+
+
 ## V1.3.9-audit.2（未发布）
 
 C01–C05 收口详见 `audit/PATCH_1.3.9-audit.2.zh-CN.md`（docs 下为 `../audit/`）。补丁未提交、未部署，最终验证见 `audit/patch_acceptance_status.json`。下方为原有历史记录，保留不改写。

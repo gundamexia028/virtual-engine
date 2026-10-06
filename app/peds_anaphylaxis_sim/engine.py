@@ -538,6 +538,17 @@ class Simulator:
             try:
                 if safe_eval(when, ctx):
                     self.apply_effects(rule.get("effects", {}))
+                    if self.state.flags.get("dead", False) and not self.state.flags.get("death_event", False):
+                        # Record the existing rule's terminal event, without changing
+                        # its trigger, vitals, timing or attributing it to omitted CPR.
+                        self.state.flags.update({
+                            "death_event": True,
+                            "death_time_sec": self.state.t,
+                            "death_reason": str(rule.get("name", "scenario_rule_death")),
+                            "outcome_class": "death_from_scenario_rule",
+                            "scenario_terminal_death": True,
+                            "resuscitation_in_progress": False,
+                        })
                     if rule.get("name") == "bp_result_available":
                         self._mark_valid_completion("check_bp")
                     self._log("tick", "rule_applied", {"rule": rule.get("name", "")})
@@ -1030,7 +1041,8 @@ class Simulator:
             f["advanced_support_indicated_current"] = True
             f["advanced_support_indicated_ever"] = True
             f["advanced_support_indicated_reason"] = f.get("advanced_support_indicated_reason") or "cardiac_arrest"
-            f["advanced_support_indicated_time_sec"] = f.get("advanced_support_indicated_time_sec") or self.state.t
+            if f.get("advanced_support_indicated_time_sec") is None:
+                f["advanced_support_indicated_time_sec"] = self.state.t
             f["advanced_support_current_reason"] = "cardiac_arrest"
             f["resuscitation_required"] = True
             f["cardiac_arrest_time_sec"] = self.state.t
@@ -1250,7 +1262,7 @@ class Simulator:
             f["advanced_support_indicated_ever"] = True
             f["advanced_support_latest_reason"] = reason
             f["advanced_support_latest_time_sec"] = self.state.t
-            if not f.get("advanced_support_indicated_time_sec"):
+            if f.get("advanced_support_indicated_time_sec") is None:
                 f["advanced_support_indicated_time_sec"] = self.state.t
                 f["advanced_support_indicated_reason"] = reason
         else:

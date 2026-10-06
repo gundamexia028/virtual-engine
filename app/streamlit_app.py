@@ -82,6 +82,9 @@ from ui_labels import (
     academy_scenario_display_name,
     format_elapsed_time,
     format_timeline_value,
+    timeline_display_rows,
+    score_feedback_label,
+    EVENT_VALUE_LABELS_CN,
     format_time_progress,
 )
 
@@ -115,6 +118,7 @@ def is_competition_mode() -> bool:
     return APP_MODE == APP_MODE_COMPETITION
 
 from peds_anaphylaxis_sim import SYSTEM_VERSION
+from peds_anaphylaxis_sim.integrity import ENGINE_REVISION
 from peds_anaphylaxis_sim.engine import Simulator, save_report
 from peds_anaphylaxis_sim import org_credentials
 from peds_anaphylaxis_sim.flow_strategies import (
@@ -581,6 +585,7 @@ def init_session() -> None:
         "last_completion_notice": "",
         "academy_flow_page": "",
         "academy_stage_reports": {},
+        "competition_clinical_completed_stages": {},
         "manual_completion_confirmation": False,
         "restart_stage_confirmation": False,
         "processed_ui_events": [],
@@ -689,6 +694,7 @@ DRAFT_SESSION_KEYS = (
     "last_completion_notice",
     "academy_flow_page",
     "academy_stage_reports",
+    "competition_clinical_completed_stages",
     "manual_completion_confirmation",
     "restart_stage_confirmation",
     "processed_ui_events",
@@ -868,22 +874,24 @@ def persist_active_training_draft(now: Optional[float] = None) -> bool:
     }
     checksum = hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
     envelope = {"payload": payload, "checksum": checksum}
-    DRAFTS_DIR.mkdir(parents=True, exist_ok=True)
     destination = _draft_path(draft_id)
     temporary = DRAFTS_DIR / f".{draft_id}.tmp-{token_secrets.token_hex(8)}"
     try:
+        DRAFTS_DIR.mkdir(parents=True, exist_ok=True)
         temporary.write_text(
             json.dumps(envelope, ensure_ascii=False, indent=2, default=str),
             encoding="utf-8",
         )
         os.replace(temporary, destination)
     except (OSError, TypeError, ValueError):
+        st.session_state.draft_save_failed = True
         return False
     finally:
         try:
             temporary.unlink(missing_ok=True)
         except OSError:
             pass
+    st.session_state.draft_save_failed = False
     _set_query_draft_id(draft_id)
     return True
 
@@ -917,8 +925,17 @@ def restore_training_draft_from_query(now: Optional[float] = None) -> bool:
         expected = hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
         if not token_secrets.compare_digest(checksum, expected):
             raise ValueError("Draft checksum mismatch.")
-        if payload.get("schema_version") != 1 or payload.get("app_version") != APP_VERSION:
-            raise ValueError("Draft version mismatch.")
+        if payload.get("schema_version") != 1:
+            raise ValueError("Draft schema mismatch.")
+        simulator_payload = payload.get("simulator")
+        if not isinstance(simulator_payload, dict):
+            raise ValueError("Draft simulator payload is invalid.")
+        if (payload.get("app_version") != APP_VERSION
+                or simulator_payload.get("engine_revision") != ENGINE_REVISION):
+            # A release boundary is not corruption. Leave old draft bytes intact;
+            # never silently migrate an in-progress case into different semantics.
+            _clear_query_draft_id()
+            return False
         if float(payload.get("expires_at", 0)) <= current_time:
             path.unlink(missing_ok=True)
             _clear_query_draft_id()
@@ -1879,14 +1896,14 @@ def _read_jsonl_unlocked(path: Path) -> Tuple[List[Dict[str, Any]], List[str]]:
         return [], []
     records: List[Dict[str, Any]] = []
     warnings: List[str] = []
-    with path.open("r", encoding="utf-8") as handle:
+    with path.open("rb") as handle:
         for line_number, raw_line in enumerate(handle, start=1):
-            line = raw_line.strip()
-            if not line:
+            if not raw_line.strip():
                 continue
             try:
+                line = raw_line.decode("utf-8").strip()
                 value = json.loads(line)
-            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
                 warnings.append(f"{path.name}:{line_number}:{type(exc).__name__}")
                 continue
             if isinstance(value, dict):
@@ -1912,8 +1929,15 @@ def _append_storage_warnings_unlocked(warnings: List[str]) -> None:
 def _append_jsonl_unlocked(path: Path, record: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     encoded = json.dumps(record, ensure_ascii=False, default=str, separators=(",", ":"))
-    with path.open("a", encoding="utf-8", newline="\n") as handle:
-        handle.write(encoded + "\n")
+    # Keep any interrupted tail as evidence; only append a record boundary.
+    # Callers hold the local lock. Never rewrite or truncate historical bytes.
+    with path.open("a+b") as handle:
+        handle.seek(0, os.SEEK_END)
+        if handle.tell():
+            handle.seek(-1, os.SEEK_END)
+            if handle.read(1) != b"\n":
+                handle.write(b"\n")
+        handle.write((encoded + "\n").encode("utf-8"))
         handle.flush()
         os.fsync(handle.fileno())
 
@@ -2098,7 +2122,10 @@ def load_full_reports_local(authorization_context: object) -> List[Dict[str, Any
         report = json.loads(json.dumps(source, ensure_ascii=False, default=str))
         questionnaire = questionnaire_by_completion.get(_record_completion_id(report))
         evaluation = questionnaire.get("academy_post_evaluation") if questionnaire else None
-        if isinstance(evaluation, dict):
+        if (isinstance(evaluation, dict) and questionnaire
+                and _record_matches_authorization(questionnaire, authorization)
+                and all(questionnaire.get(key, "") == (report.get("session", {}) or {}).get(key, "")
+                        for key in ("session_id", "organization_type", "organization_id"))):
             report["academy_post_evaluation"] = evaluation
             session = report.setdefault("session", {})
             if isinstance(session, dict):
@@ -2114,14 +2141,52 @@ def load_full_reports_local(authorization_context: object) -> List[Dict[str, Any
     return merged
 
 
+def _merge_local_evaluation(report: Dict[str, Any], local_reports: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Overlay only a matching authorized local questionnaire; never change scores."""
+    report = deepcopy(report)
+    session = report.get("session", {}) or {}
+    for local in local_reports:
+        other = local.get("session", {}) or {}
+        if (not session.get("session_id")
+                or _record_completion_id(report) != _record_completion_id(local)
+                or any(session.get(key, "") != other.get(key, "")
+                       for key in ("session_id", "organization_type", "organization_id", "participant_id"))):
+            continue
+        evaluation = local.get("academy_post_evaluation")
+        if isinstance(evaluation, dict) and evaluation.get("completed"):
+            report["academy_post_evaluation"] = deepcopy(evaluation)
+            for key in ("academy_post_evaluation_completed", "academy_post_evaluation_time",
+                        "sus_score", "sus_level", "teaching_experience_total", "teaching_experience_mean"):
+                session[key] = other.get(key, "")
+            report["session"] = session
+            break
+    return report
+
+
 def load_result_records(authorization_context: object) -> List[Dict[str, Any]]:
     authorization = validate_authorization_context(authorization_context)
     if authorization is None:
         return []
     db_records, _ = load_result_records_database(authorization)
-    if db_records:
-        return list(reversed(db_records))
     full_local = load_full_reports_local(authorization)
+    if db_records:
+        # Summary adapter callers retain their normal cloud fields. Only a verified
+        # matching local questionnaire overlays its evaluation columns.
+        local_summaries = build_summary_records_from_reports(full_local, storage_source="local")
+        merged_records = []
+        for record in db_records:
+            record = dict(record)
+            for local in local_summaries:
+                if (record.get("session_id") and _record_completion_id(record) == _record_completion_id(local)
+                        and all(record.get(key, "") == local.get(key, "") for key in
+                                ("session_id", "organization_type", "organization_id", "participant_id"))
+                        and local.get("academy_post_evaluation_completed")):
+                    for key, value in local.items():
+                        if key.startswith(("sus_", "teaching_experience_", "academy_post_evaluation_")):
+                            record[key] = value
+                    break
+            merged_records.append(record)
+        return list(reversed(merged_records))
     if full_local:
         return build_summary_records_from_reports(full_local, storage_source="local")
     return load_result_records_local(authorization)
@@ -2321,7 +2386,7 @@ def _missing_text(report: Dict[str, Any]) -> str:
 
 
 def full_report_from_database_row(row: Dict[str, Any]) -> Dict[str, Any]:
-    report = row.get("full_report") or {}
+    report = deepcopy(row.get("full_report") or {})
     if not isinstance(report, dict):
         report = {}
     # Merge database-level fields back when older reports lack session metadata.
@@ -2862,7 +2927,7 @@ def get_action_history_rows(sim: Simulator) -> List[Dict[str, Any]]:
         data = entry.data or {}
         msg = entry.message
         result = ""
-        display = data.get("label") or labels.get(msg, msg)
+        display = data.get("label") or labels.get(msg, ACTION_LABELS_CN.get(msg, msg))
         if msg == "im_epinephrine_dose_verified":
             display = "肌注肾上腺素剂量确认"
             result = f"有效剂量 {data.get('dose_mg', '')} mg"
@@ -2914,6 +2979,13 @@ def start_simulation(scenario_path: Path, mode: str, seed: int, participant_id: 
     )
     script_name = safe_filename_part(meta.get("script_name") or scenario_path.stem)
     participant = safe_filename_part(participant_id or "anonymous")
+    if is_competition_mode() and current_system_mode() == "clinical":
+        phase = str(st.session_state.get("assessment_phase", ""))
+        if phase in COMPETITION_CLINICAL_PHASES:
+            history = dict(st.session_state.get("competition_clinical_completed_stages", {}) or {})
+            for item in COMPETITION_CLINICAL_PHASES[COMPETITION_CLINICAL_PHASES.index(phase):]:
+                history.pop(item, None)
+            st.session_state.competition_clinical_completed_stages = history
     st.session_state.active_simulator = sim
     st.session_state.flow_strategy_id = strategy.strategy_id
     st.session_state.active_scenario = scenario
@@ -2967,6 +3039,20 @@ def start_simulation(scenario_path: Path, mode: str, seed: int, participant_id: 
     if st.session_state.get("assessment_phase") not in ("基线评估", "课前测评"):
         st.session_state.baseline_stage_completed = False
     if current_system_mode() == "academy":
+        phase = str(st.session_state.get("assessment_phase", ""))
+        phases = ("课前测评", "模拟训练", "课后考核")
+        if phase in phases:
+            reports = dict(st.session_state.get("academy_stage_reports", {}) or {})
+            for reset_phase in phases[phases.index(phase):]:
+                reports.pop(stage_report_key(reset_phase), None)
+            st.session_state.academy_stage_reports = reports
+            st.session_state.academy_transition_locks = {}
+            st.session_state.academy_post_evaluation_completed = False
+            st.session_state.academy_post_evaluation_time = ""
+            st.session_state.sus_score = ""
+            st.session_state.sus_level = ""
+            st.session_state.teaching_experience_total = ""
+            st.session_state.teaching_experience_mean = ""
         stage_sessions = dict(
             st.session_state.get("academy_stage_session_ids", {}) or {}
         )
@@ -3025,16 +3111,65 @@ def _enter_completed_clinical_result(report: Dict[str, Any], why: str) -> None:
         persist_active_training_draft()
 
 
+COMPETITION_CLINICAL_PHASES = ("基线评估", "模拟培训", "培训后考核")
+
+
+def _next_competition_clinical_phase(report: Dict[str, Any]) -> str:
+    phase = str(st.session_state.get("assessment_phase", ""))
+    if not is_competition_mode() or current_system_mode() != "clinical" or phase not in COMPETITION_CLINICAL_PHASES[:-1]:
+        return ""
+    session = report.get("session", {}) if isinstance(report, dict) else {}
+    if not isinstance(session, dict):
+        return ""
+    if (not st.session_state.get("ended") or not st.session_state.get("result_saved")
+            or st.session_state.get("pending_prior_experience_survey")
+            or not st.session_state.get("prior_experience_survey_completed")
+            or not session.get("session_id")
+            or any(session.get(key) != st.session_state.get(key) for key in
+                   ("session_id", "participant_id", "assessment_phase", "completion_id"))):
+        return ""
+    history = st.session_state.get("competition_clinical_completed_stages", {}) or {}
+    index = COMPETITION_CLINICAL_PHASES.index(phase)
+    required = COMPETITION_CLINICAL_PHASES[:index+1]
+    if not all(isinstance(history.get(item), dict) and history[item].get("session_id") for item in required):
+        return ""
+    if history[phase].get("session_id") != session["session_id"]:
+        return ""
+    return COMPETITION_CLINICAL_PHASES[index+1]
+
+
 def continue_after_clinical_result(report: Dict[str, Any], why: str) -> bool:
     """Advance only after an explicit click; retain the result if transition fails."""
     simulator = st.session_state.get("active_simulator")
     scenario = st.session_state.get("active_scenario")
     scenario_path = st.session_state.get("active_scenario_path", "")
     script_name = st.session_state.get("active_script_name", "")
+    previous_workflow = {key: st.session_state.get(key) for key in
+                         ("assessment_phase", "workflow_mode", "workflow_script_role", "workflow_display", "mode")}
+    previous_draft_state = ({key: deepcopy(st.session_state[key]) for key in DRAFT_SESSION_KEYS
+                             if key in st.session_state} if is_competition_mode() else {})
     try:
-        _return_to_registration_after_save(report, why)
+        if is_competition_mode():
+            phase = _next_competition_clinical_phase(report)
+            if not phase:
+                return False
+            workflow = workflow_for_phase(phase, "clinical")
+            next_path = scenario_path_by_role(workflow["script_role"])
+            if not next_path.is_file():
+                return False
+            st.session_state.assessment_phase = phase
+            st.session_state.workflow_mode = workflow["mode"]
+            st.session_state.workflow_script_role = workflow["script_role"]
+            st.session_state.workflow_display = workflow["display"]
+            st.session_state.mode = workflow["mode"]
+            start_simulation(next_path, workflow["mode"], st.session_state.get("seed", -1),
+                             st.session_state.get("participant_id", ""))
+        else:
+            _return_to_registration_after_save(report, why)
         return True
     except Exception:
+        st.session_state.update(previous_draft_state)
+        st.session_state.update(previous_workflow)
         st.session_state.profile_completed = True
         st.session_state.active_simulator = simulator
         st.session_state.active_scenario = scenario
@@ -3193,6 +3328,14 @@ def submit_academy_post_evaluation(
         or st.session_state.get("academy_post_evaluation_completed", False)
     ):
         return True, "课后评价已完成并保存，请勿重复提交。"
+    def valid_answers(values: object, count: int) -> bool:
+        return (isinstance(values, list) and len(values) == count
+                and all(type(value) is int and 1 <= value <= 5 for value in values))
+    if not (valid_answers(sus_values, len(SUS_ITEMS))
+            and valid_answers(teaching_values, len(TEACHING_EXPERIENCE_ITEMS))):
+        st.session_state.questionnaire_submit_status = "failed"
+        st.session_state.questionnaire_submit_error = "请完整填写全部评价题目，每题须选择1至5分。"
+        return False, st.session_state.questionnaire_submit_error
     normalized_sus = _normalized_questionnaire_values(sus_values, len(SUS_ITEMS))
     normalized_teaching = _normalized_questionnaire_values(
         teaching_values,
@@ -3387,12 +3530,19 @@ def _save_and_end_report(report: Dict[str, Any], why: str) -> None:
         st.session_state.last_report_paths = (json_path, md_path)
     st.session_state.result_saved = True
     st.session_state.last_report = deepcopy(report)
+    if is_competition_mode() and current_system_mode() == "clinical":
+        phase = str(st.session_state.get("assessment_phase", ""))
+        history = dict(st.session_state.get("competition_clinical_completed_stages", {}) or {})
+        session = report.get("session", {}) or {}
+        if phase in COMPETITION_CLINICAL_PHASES and session.get("session_id") == st.session_state.get("session_id"):
+            history[phase] = {"session_id": session["session_id"], "completion_id": session.get("completion_id", "")}
+            st.session_state.competition_clinical_completed_stages = history
     if current_system_mode() == "academy":
         phase = str(st.session_state.get("assessment_phase", "") or "")
         page = completion_page_for_phase(phase)
         report_key = stage_report_key(phase)
         stage_reports = dict(st.session_state.get("academy_stage_reports", {}) or {})
-        if report_key and report_key not in stage_reports:
+        if report_key:
             stage_reports[report_key] = json.loads(
                 json.dumps(report, ensure_ascii=False, default=str)
             )
@@ -3527,6 +3677,12 @@ def render_participant_entry_page() -> None:
     render_version_corner()
     mode = current_system_mode()
     mode_label = current_system_mode_label()
+    if is_competition_mode():
+        st.info("当前为匿名虚拟演示，不采集正式个人资料，也不写入正式云端数据库。")
+        if st.button("返回评审首页", key="competition_registration_return"):
+            return_home_after_clinical_result()
+            st.rerun()
+        return
     st.markdown(
         f"""
         <div class='login-hero'>
@@ -3672,6 +3828,7 @@ def render_participant_entry_page() -> None:
                 old_participant_id = st.session_state.get("participant_id", "")
                 participant_changed = bool(old_participant_id and generated_id and generated_id != old_participant_id)
                 if participant_changed:
+                    _clear_participant_results()
                     st.session_state.prior_anaphylaxis_training = ""
                     st.session_state.prior_simulation_experience = ""
                     st.session_state.real_case_experience = ""
@@ -3888,6 +4045,7 @@ def render_participant_entry_page() -> None:
             old_participant_id = st.session_state.get("participant_id", "")
             participant_changed = bool(old_participant_id and generated_id and generated_id != old_participant_id)
             if participant_changed:
+                _clear_participant_results()
                 st.session_state.prior_anaphylaxis_training = ""
                 st.session_state.prior_simulation_experience = ""
                 st.session_state.real_case_experience = ""
@@ -4432,6 +4590,27 @@ def inject_compact_css() -> None:
             overflow: visible !important;
             text-overflow: clip !important;
             display: block !important;
+        }
+        /* Action widgets include a tooltip wrapper when help is present.
+           Scope descendant selectors to action keys, never to unrelated forms. */
+        [class*="st-key-action_"] button {
+            height: auto !important;
+            min-height: 2.85rem !important;
+            white-space: normal !important;
+            overflow: visible !important;
+            text-overflow: clip !important;
+        }
+        [class*="st-key-action_"] button span[data-has-shortcut],
+        [class*="st-key-action_"] button [data-testid="stMarkdownContainer"],
+        [class*="st-key-action_"] button p {
+            white-space: normal !important;
+            overflow-wrap: anywhere !important;
+            word-break: normal !important;
+            overflow: visible !important;
+            text-overflow: clip !important;
+            -webkit-line-clamp: unset !important;
+            max-height: none !important;
+            line-height: 1.25 !important;
         }
         [data-testid="stSidebar"] .stButton > button {
             min-height: 2.30rem !important;
@@ -5087,8 +5266,34 @@ def setup_competition_participant(system_mode: str = "academy") -> None:
     st.session_state.profile_completed = True
 
 
+def _clear_participant_results() -> None:
+    """Forget browser-local learner results at a participant boundary only."""
+    empty = {
+        "prior_anaphylaxis_training": "", "prior_simulation_experience": "",
+        "real_case_experience": "", "prior_experience_survey_completed": False,
+        "prior_experience_survey_time": "", "baseline_performance_completed": False,
+        "baseline_stage_completed": False, "pending_prior_experience_survey": False,
+        "pending_completion_reason": "", "pending_report": None,
+        "academy_stage_reports": {}, "academy_stage_session_ids": {},
+        "competition_clinical_completed_stages": {},
+        "academy_transition_locks": {}, "abandoned_stage_sessions": [],
+        "academy_flow_page": "", "pending_academy_post_evaluation": False,
+        "pending_post_evaluation_report": None, "pending_post_evaluation_reason": "",
+        "academy_post_evaluation_completed": False, "academy_post_evaluation_time": "",
+        "sus_score": "", "sus_level": "", "teaching_experience_total": "",
+        "teaching_experience_mean": "", "questionnaire_submission_id": "",
+        "questionnaire_draft": {}, "questionnaire_submit_status": "",
+        "questionnaire_submit_error": "", "completion_id": "", "session_id": "",
+        "last_report": None, "last_report_paths": None, "result_saved": False,
+        "processed_ui_events": [], "manual_completion_confirmation": False,
+        "restart_stage_confirmation": False,
+    }
+    st.session_state.update(empty)
+
+
 def reset_for_mode_selection(system_mode: str) -> None:
     clear_training_draft()
+    _clear_participant_results()
     st.session_state.system_mode = system_mode
     st.session_state.organization_type = system_mode
     st.session_state.organization_id = ""
@@ -5589,8 +5794,12 @@ def render_admin_page() -> None:
         st.info("当前未配置 Supabase 云端数据库，系统将仅显示本地备用记录。")
 
     if raw_db_rows:
-        full_reports = [full_report_from_database_row(x) for x in raw_db_rows]
-        summary_records = [normalize_database_record(x) for x in raw_db_rows]
+        full_reports = [_merge_local_evaluation(full_report_from_database_row(x), local_full_reports)
+                        for x in raw_db_rows]
+        summary_records = []
+        for row, report in zip(raw_db_rows, full_reports):
+            merged_row = dict(row, full_report=report)
+            summary_records.append(normalize_database_record(merged_row))
         action_detail_records = build_action_detail_records_from_reports(full_reports, storage_source="supabase")
         raw_jsonl_records = full_reports
         storage_label = "supabase"
@@ -6099,6 +6308,7 @@ def _reset_academy_flow_for_new_learner() -> None:
         setup_competition_participant("academy")
         return
     clear_training_draft()
+    _clear_participant_results()
     st.session_state.profile_completed = False
     st.session_state.active_simulator = None
     st.session_state.active_scenario = None
@@ -6187,12 +6397,34 @@ def render_academy_flow_page() -> None:
         reports,
         questionnaire_completed=questionnaire_completed,
     ):
-        page = latest_allowed_academy_page(
-            reports,
-            questionnaire_completed=questionnaire_completed,
-        )
+        # A permitted direct-stage entry must show its own completion, never
+        # silently downgrade to another phase's older report.
+        phase = str(st.session_state.get("assessment_phase", ""))
+        if page == completion_page_for_phase(phase):
+            phase = str(st.session_state.get("assessment_phase", ""))
+            standalone = _academy_stage_report(stage_report_key(phase))
+            session = standalone.get("session", {}) if standalone else {}
+            if (standalone and session.get("session_id") == st.session_state.get("session_id")
+                    and session.get("participant_id") == st.session_state.get("participant_id")):
+                st.session_state.academy_flow_page = completion_page_for_phase(phase)
+                st.markdown(f"### {phase}完成（独立阶段）")
+                st.info("本阶段结果已保存；缺少前序阶段记录，不计为完整课程完成。")
+                _render_stage_score_cards(standalone)
+                _render_module_overview(standalone)
+                _render_stage_feedback(standalone)
+                if st.button("返回登记页", key="standalone_return_registration"):
+                    clear_training_draft()
+                    st.session_state.profile_completed = False
+                    st.session_state.active_simulator = None
+                    st.session_state.academy_flow_page = ""
+                    st.rerun()
+            else:
+                st.warning("未找到当前学员的完整阶段记录，请返回登记页。")
+            return
+        page = latest_allowed_academy_page(reports, questionnaire_completed=questionnaire_completed)
         st.session_state.academy_flow_page = page
         if not page:
+            st.warning("未找到当前学员的完整阶段记录，请返回登记页。")
             return
     if (
         page == "questionnaire"
@@ -6306,6 +6538,8 @@ def render_simulation() -> None:
     if st.session_state.active_simulator is None or not st.session_state.get("profile_completed", False):
         st.rerun()
     persist_active_training_draft()
+    if st.session_state.get("draft_save_failed", False):
+        st.warning("当前进度暂时无法写入恢复草稿，请勿刷新或关闭页面；可继续操作并稍后重试。")
     if st.session_state.get("draft_restored_notice"):
         st.success(st.session_state.draft_restored_notice)
         st.session_state.draft_restored_notice = ""
@@ -6403,7 +6637,7 @@ def render_simulation() -> None:
             render_action_history(sim)
 
             st.divider()
-            c1, c2, c3 = st.columns([1.0, 1.35, 1.95], gap="medium")
+            c1, c2, c3 = st.columns([1.0, 1.8, 1.5], gap="medium")
             c1.button(format_time_progress(sim.tick_seconds), use_container_width=True,
                 key=f"advance_time_{st.session_state.session_id}", on_click=_dispatch_ui_command,
                 args=(st.session_state.session_id, command_revision(sim), "advance_time"),
@@ -6530,7 +6764,7 @@ def build_result_page_context(report: Dict[str, Any], end_reason: str) -> Dict[s
             continue
         action_id = str(entry.get("message", "") or "")
         data = entry.get("data", {}) or {}
-        action_labels[action_id] = str(data.get("label", "") or action_id)
+        action_labels[action_id] = str(data.get("label", "") or ACTION_LABELS_CN.get(action_id, action_id))
     score_awards = (report.get("clinical_pathway_flags", {}) or {}).get("score_awards", []) or []
     scored_actions = []
     for award in score_awards:
@@ -6538,10 +6772,10 @@ def build_result_page_context(report: Dict[str, Any], end_reason: str) -> Dict[s
             continue
         action_id = str(award.get("action_id", "") or award.get("score_key", ""))
         scored_actions.append({
-            "操作": action_labels.get(action_id, action_id or "未记录"),
+            "操作": action_labels.get(action_id, ACTION_LABELS_CN.get(action_id, action_id or "未记录")),
             "得分": f"{award.get('awarded_points', 0)}/{award.get('max_points', 0)}",
-            "结果": str(award.get("status", "") or "未记录"),
-            "现有反馈": str(award.get("reason", "") or ""),
+            "结果": EVENT_VALUE_LABELS_CN.get(str(award.get("status", "")), str(award.get("status", "") or "未记录")),
+            "现有反馈": score_feedback_label(award.get("reason", "")),
         })
     return {
         "system_mode": system_mode,
@@ -6618,10 +6852,7 @@ def render_report() -> None:
     with left:
         st.markdown("**关键时间轴**")
         timeline = report.get("key_timeline", {})
-        st.table([
-            {"指标": k, "时间/次数": format_timeline_value(k, v)}
-            for k, v in timeline.items()
-        ])
+        st.table(timeline_display_rows(timeline))
     with right:
         st.markdown("**问题汇总**")
         issues = report.get("process_safety_issues", [])
@@ -6664,9 +6895,18 @@ def render_report() -> None:
     ):
         st.divider()
         st.markdown("**后续流程**")
-        st.caption("本次临床结果已经保存。当前临床流程未配置独立SUS或教学体验问卷，可继续返回登记选择下一阶段，也可重新开始本阶段。")
+        st.caption("本次虚拟演示结果已保存。可继续下一演示阶段、重新开始本阶段或返回评审首页。"
+                   if is_competition_mode() else
+                   "本次临床结果已经保存。当前临床流程未配置独立SUS或教学体验问卷，可继续返回登记选择下一阶段，也可重新开始本阶段。")
         next_col, restart_col, home_col = st.columns(3, gap="medium")
-        if next_col.button("继续后续流程", type="primary", use_container_width=True):
+        can_continue = not is_competition_mode() or bool(_next_competition_clinical_phase(report))
+        if is_competition_mode() and st.session_state.get("assessment_phase") == COMPETITION_CLINICAL_PHASES[-1]:
+            history = st.session_state.get("competition_clinical_completed_stages", {}) or {}
+            if all(history.get(phase) for phase in COMPETITION_CLINICAL_PHASES):
+                st.success("临床演示三阶段已完成。")
+            else:
+                st.info("本阶段已完成。")
+        if can_continue and next_col.button("继续后续流程", type="primary", use_container_width=True):
             if continue_after_clinical_result(report, st.session_state.end_reason):
                 st.rerun()
             else:
@@ -6698,7 +6938,7 @@ def render_report() -> None:
                     st.rerun()
                 else:
                     st.error("未找到当前病例文件，本次结果仍已保留。")
-        if home_col.button("返回首页", use_container_width=True):
+        if home_col.button("返回评审首页" if is_competition_mode() else "返回首页", use_container_width=True):
             return_home_after_clinical_result()
             st.rerun()
 
