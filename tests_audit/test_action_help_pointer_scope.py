@@ -17,4 +17,13 @@ class ActionHelpPointerScopeTests(unittest.TestCase):
   self.assertIn('on_click=_dispatch_ui_command',source)
   self.assertNotIn('force=True',source)
   self.assertNotIn('force: true',source)
+ def test_only_explicitly_exiting_readonly_tooltip_content_is_hidden(self):
+  source=(ROOT/'app/streamlit_app.py').read_text()
+  selector='[data-overlay-container="true"] [role="tooltip"][data-exiting="true"] > [data-testid="stTooltipContent"]:not(:has(a, button, input, select, textarea, [role="button"], [contenteditable="true"], [tabindex]:not([tabindex="-1"])))'
+  self.assertEqual(source.count(selector),2)
+  self.assertIn(selector+' * {\n            visibility: hidden !important;\n            pointer-events: none !important;',source)
+  block=source[source.index('/* Hide only text help'):source.index('[data-testid="stSidebar"] .stButton > button')]
+  self.assertNotIn('display: none',block)
+  self.assertNotIn('body:has',block)
+  self.assertNotIn('aria-hidden',block)
 if __name__=='__main__':unittest.main(verbosity=2)

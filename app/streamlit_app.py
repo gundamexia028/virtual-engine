@@ -2915,6 +2915,29 @@ def action_label_map(sim: Simulator) -> Dict[str, str]:
     return {str(a.get("id", "")): display_action_label(a, sim) for a in sim.actions}
 
 
+# Display-only dictionaries. Keep machine codes in logs, reports and exports.
+_HISTORY_RESULT_LABELS_CN = {
+    "valid_volume": "补液量在本例范围内",
+    "no_iv_access": "静脉通路不可用",
+    "used_before_first_line_epinephrine": "未先完成有效肌注肾上腺素",
+    "insufficient_volume": "补液量不足",
+    "excessive_volume": "补液量超过本例范围",
+    "effective": "剂量已确认有效",
+    "ineffective": "剂量不足，本次未计为有效",
+    "dose_high_effect_recorded": "剂量偏高，已记录模拟药物作用",
+    "serious_medication_error": "严重用药安全事件",
+    "premature": "再次给药前置步骤尚未完成",
+    "not_indicated": "当前暂不需要再次肌注",
+}
+_HISTORY_EVENT_LABELS_CN = {
+    "fluid_bolus_before_epinephrine": "有效肌注肾上腺素前的补液操作",
+    "repeat_epinephrine_too_soon": "再次肌注间隔不足",
+    "repeat_epinephrine_underdose": "再次肌注肾上腺素剂量不足",
+    "repeat_epinephrine_dose_high": "再次肌注肾上腺素剂量偏高",
+    "repeat_epinephrine_overdose": "再次肌注肾上腺素过量",
+}
+
+
 def get_action_history_rows(sim: Simulator) -> List[Dict[str, Any]]:
     labels = action_label_map(sim)
     show_results = current_flow_strategy(sim).show_immediate_feedback
@@ -2928,6 +2951,10 @@ def get_action_history_rows(sim: Simulator) -> List[Dict[str, Any]]:
         msg = entry.message
         result = ""
         display = data.get("label") or labels.get(msg, ACTION_LABELS_CN.get(msg, msg))
+        if display == msg:
+            display = _HISTORY_EVENT_LABELS_CN.get(msg, display)
+        raw_result = str(data.get("result", ""))
+        result_label = _HISTORY_RESULT_LABELS_CN.get(raw_result, raw_result)
         if msg == "im_epinephrine_dose_verified":
             display = "肌注肾上腺素剂量确认"
             result = f"有效剂量 {data.get('dose_mg', '')} mg"
@@ -2942,9 +2969,9 @@ def get_action_history_rows(sim: Simulator) -> List[Dict[str, Any]]:
             result = f"过量：{data.get('dose_mg', '')} mg"
         elif msg in ["fluid_bolus_volume_verified", "fluid_bolus_under", "fluid_bolus_over", "fluid_bolus_invalid_no_iv"]:
             display = ACTION_LABELS_CN.get(msg, msg)
-            result = f"{data.get('result', '')}｜{data.get('volume_ml', '')} ml"
+            result = f"{result_label}｜{data.get('volume_ml', '')} ml"
         elif data.get("result"):
-            result = str(data.get("result", ""))
+            result = result_label
         elif data.get("gained") is not None:
             result = f"得分 +{data.get('gained')}"
         rows.append(
@@ -4618,6 +4645,14 @@ def inject_compact_css() -> None:
            dialogs, menus and their overlay containers retain normal events. */
         body:has([class*="st-key-action_"] [data-testid="stTooltipHoverTarget"][aria-describedby]) [data-overlay-container="true"] [role="tooltip"] [data-testid="stTooltipContent"]:not(:has(a, button, input, select, textarea, [role="button"], [contenteditable="true"], [tabindex]:not([tabindex="-1"]))),
         body:has([class*="st-key-action_"] [data-testid="stTooltipHoverTarget"][aria-describedby]) [data-overlay-container="true"] [role="tooltip"] [data-testid="stTooltipContent"]:not(:has(a, button, input, select, textarea, [role="button"], [contenteditable="true"], [tabindex]:not([tabindex="-1"]))) * {
+            pointer-events: none !important;
+        }
+        /* Hide only text help the component has already marked as exiting.
+           Keep its DOM/ARIA lifecycle intact and all active hover/focus help
+           visible. No action-open gate: orphaned exit layers outlive triggers. */
+        [data-overlay-container="true"] [role="tooltip"][data-exiting="true"] > [data-testid="stTooltipContent"]:not(:has(a, button, input, select, textarea, [role="button"], [contenteditable="true"], [tabindex]:not([tabindex="-1"]))),
+        [data-overlay-container="true"] [role="tooltip"][data-exiting="true"] > [data-testid="stTooltipContent"]:not(:has(a, button, input, select, textarea, [role="button"], [contenteditable="true"], [tabindex]:not([tabindex="-1"]))) * {
+            visibility: hidden !important;
             pointer-events: none !important;
         }
         [data-testid="stSidebar"] .stButton > button {
@@ -6359,10 +6394,38 @@ def _render_stage_score_cards(report: Dict[str, Any]) -> None:
     c3.metric("安全扣分", summary["penalties"])
 
 
+# Result-page presentation only. The raw report/export lists retain action IDs.
+_RESULT_ACTION_LABELS_CN = {
+    **ACTION_LABELS_CN,
+    "bvm_ventilation": "球囊加压给氧",
+    "academy_medication_check": "在老师/医生指导下完成患儿、体重、药名、剂量、浓度及肌内途径核对（尚未给药）",
+    "academy_assisted_medication": "核对无误后，在老师/医生指导下配合完成肾上腺素肌内给药，并确认实际给药完成",
+    "academy_restore_iv": "通路丢失后，在老师/医生指导下配合重新建立静脉通路",
+    "ask_family_first": "先详细询问家属既往过敏史，暂不处理床旁变化",
+    "send_family_for_help": "让家属去护士站找老师或医生",
+    "prepare_steroid_antihistamine_only": "只优先准备糖皮质激素或抗组胺药",
+    "student_independent_epinephrine": "护生自行抽取并独立注射急救药物",
+    "watch_only": "只在旁边观看，等待老师处理",
+}
+
+
+def _result_feedback_text(value: object) -> str:
+    text = str(value)
+    action_id, separator, description = text.partition(":")
+    if action_id in _RESULT_ACTION_LABELS_CN and separator:
+        # Engine unfinished steps already carry their exact human description.
+        text = description.strip() or _RESULT_ACTION_LABELS_CN[action_id]
+    return re.sub(
+        r"(?<![A-Za-z0-9_-])[A-Za-z][A-Za-z0-9_-]*(?![A-Za-z0-9_-])",
+        lambda match: _RESULT_ACTION_LABELS_CN.get(match.group(0), match.group(0)),
+        text,
+    )
+
+
 def _render_stage_feedback(report: Dict[str, Any]) -> None:
     summary = score_snapshot(report)
-    issues = [str(item) for item in summary["issues"]]
-    missing = [str(item) for item in summary["missing"]]
+    issues = [_result_feedback_text(item) for item in summary["issues"]]
+    missing = [_result_feedback_text(item) for item in summary["missing"]]
     left, right = st.columns(2)
     left.markdown("**关键错误行为**")
     left.write("无" if not issues else "；".join(issues))
@@ -6494,7 +6557,8 @@ def render_academy_flow_page() -> None:
         st.markdown("**个性化改进建议**")
         issues = report.get("process_safety_issues", []) or []
         missing = report.get("critical_missing", []) or []
-        suggestions = list(dict.fromkeys([*map(str, issues), *map(str, missing)]))
+        suggestions = [_result_feedback_text(item) for item in
+                       dict.fromkeys([*map(str, issues), *map(str, missing)])]
         st.write("继续巩固既有正确流程。" if not suggestions else "；".join(suggestions))
 
     primary_label = {
@@ -6531,6 +6595,12 @@ def render_academy_flow_page() -> None:
                 st.rerun()
             else:
                 st.error("未找到下一阶段病例，本阶段结果仍已保留。")
+
+
+def _coach_prompt_for_display(sim: Simulator, item: Dict[str, Any]) -> Dict[str, Any]:
+    if sim.is_done()[0]:
+        return {"text": "本轮已结束，可查看记录并确认结束。", "reason": ""}
+    return dict(item)
 
 
 def render_simulation() -> None:
@@ -6575,6 +6645,7 @@ def render_simulation() -> None:
 
         if strategy.use_guided_prompts:
             item = sim.get_guided_prompt_item() if hasattr(sim, "get_guided_prompt_item") else {"text": sim.get_guided_prompt(), "reason": ""}
+            item = _coach_prompt_for_display(sim, item)
             prompt = str(item.get("text", ""))
             reason = str(item.get("reason", ""))
             if prompt:
@@ -6748,6 +6819,44 @@ RESULT_END_REASON_LABELS = {
 }
 
 
+def _result_completion_notice(report: Dict[str, Any], end_reason: str) -> Tuple[str, str]:
+    """Presentation severity follows recorded outcomes, never a score cutoff."""
+    session = report.get("session", {})
+    session = session if isinstance(session, dict) else {}
+    reason = str(report.get("end_reason") or session.get("end_reason") or end_reason or "")
+    label = RESULT_END_REASON_LABELS.get(reason, reason or "未记录结束原因")
+    timeline = report.get("key_timeline", {})
+    timeline = timeline if isinstance(timeline, dict) else {}
+    flags = report.get("clinical_pathway_flags", {})
+    flags = flags if isinstance(flags, dict) else {}
+    death = (report.get("death_event") is True
+             or report.get("death_after_arrest_without_cpr") is True
+             or report.get("outcome_class") in
+             ("death_after_cardiac_arrest_without_cpr", "death_from_scenario_rule"))
+    serious_error = timeline.get("serious_medication_error") is True
+    if death:
+        return "error", "情景结束：失败结局（报告记录死亡事件）"
+    if reason == "failure":
+        suffix = "（报告记录严重用药安全事件）" if serious_error else ""
+        return "error", "情景结束：失败结局" + suffix
+    if serious_error:
+        return "error", f"情景结束：{label}；报告记录严重用药安全事件"
+    if reason in ("manual_end", "participant_confirmed_rescue_complete"):
+        return "warning", "本阶段已手动确认结束；手动结束不代表标准路径完成。"
+    if reason in ("timeout", "critical_resuscitated_transfer_picu") or report.get("outcome_class") == "critical_resuscitated_transfer_picu":
+        return "warning", f"情景结束：{label}"
+    reviews = []
+    if report.get("process_safety_issues"):
+        reviews.append("存在过程性安全问题")
+    if report.get("critical_missing") or flags.get("unfinished_required_steps"):
+        reviews.append("存在未完成步骤")
+    if reviews:
+        return "warning", f"情景结束：{label}；" + "，".join(reviews) + "，请结合问题汇总复盘。"
+    if reason in ("success", "standard_assessment_completed"):
+        return "success", f"情景结束：{label}"
+    return "info", f"情景结束：{label}"
+
+
 def build_result_page_context(report: Dict[str, Any], end_reason: str) -> Dict[str, Any]:
     session_meta = report.get("session", {}) or {}
     mode_code = str(report.get("mode", "") or session_meta.get("workflow_mode", ""))
@@ -6822,7 +6931,8 @@ def render_report() -> None:
             {"项目": "病例名称", "内容": result_context["scenario_title"]},
             {"项目": "完成状态", "内容": result_context["completion_label"]},
         ])
-    st.success(f"情景结束：{result_context['completion_label']}")
+    notice_level, notice_text = _result_completion_notice(report, st.session_state.end_reason)
+    getattr(st, notice_level)(notice_text)
     session_meta = report.get("session", {}) or {}
     if is_competition_mode():
         st.caption("评审学员-001｜虚拟演示记录")
@@ -6863,14 +6973,14 @@ def render_report() -> None:
         st.table(timeline_display_rows(timeline))
     with right:
         st.markdown("**问题汇总**")
-        issues = report.get("process_safety_issues", [])
-        missing = report.get("critical_missing", [])
+        issues = [_result_feedback_text(item) for item in report.get("process_safety_issues", []) or []]
+        missing = [_result_feedback_text(item) for item in report.get("critical_missing", []) or []]
         st.write("过程性安全缺陷：" + ("无" if not issues else "、".join(issues)))
         st.write("缺失关键动作：" + ("无" if not missing else "、".join(missing)))
         flags = report.get("clinical_pathway_flags", {}) or {}
         unfinished = flags.get("unfinished_required_steps", []) or []
         if unfinished:
-            st.write("主动确认完成时未完成步骤：" + "、".join(map(str, unfinished)))
+            st.write("主动确认完成时未完成步骤：" + "、".join(_result_feedback_text(item) for item in unfinished))
 
         if not is_competition_mode():
             st.download_button(
@@ -6911,7 +7021,7 @@ def render_report() -> None:
         if is_competition_mode() and st.session_state.get("assessment_phase") == COMPETITION_CLINICAL_PHASES[-1]:
             history = st.session_state.get("competition_clinical_completed_stages", {}) or {}
             if all(history.get(phase) for phase in COMPETITION_CLINICAL_PHASES):
-                st.success("临床演示三阶段已完成。")
+                st.info("本次临床演示三阶段记录已完成。")
             else:
                 st.info("本阶段已完成。")
         if can_continue and next_col.button("继续后续流程", type="primary", use_container_width=True):

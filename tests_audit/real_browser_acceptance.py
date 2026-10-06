@@ -92,6 +92,12 @@ def main():
      })""",{'expected':expected,'mode':mode,'timeout':timeout})
      expect(page.locator('.history-panel')).to_have_count(1,timeout=timeout)
      return text
+    exit_help_selector='[data-overlay-container="true"] [role="tooltip"][data-exiting="true"] > [data-testid="stTooltipContent"]:not(:has(a,button,input,select,textarea,[role="button"],[contenteditable="true"],[tabindex]:not([tabindex="-1"])))'
+    def hidden_or_removed_exit_help():
+     # React may naturally remove exits. If it retains them, every text layer
+     # must be visually hidden; never remove/hide DOM from the test itself.
+     page.wait_for_function('(selector)=>Array.from(document.querySelectorAll(selector)).every(n=>[n,...n.querySelectorAll("*")].every(e=>getComputedStyle(e).visibility==="hidden"))',arg=exit_help_selector,timeout=15000)
+     return page.locator(exit_help_selector).evaluate_all('(nodes)=>nodes.map(n=>({id:n.parentElement.id,text:n.textContent,visibility:getComputedStyle(n).visibility,pointerEvents:getComputedStyle(n).pointerEvents}))')
     def real_action(aid,completion=''):
      before_history=settled_history();key=action_key(aid)
      if aid in ('im_epinephrine','fluid_bolus','steroid'):
@@ -116,7 +122,28 @@ def main():
       assert help_text in expected_help,help_text
       pointer_events=tooltip.evaluate('(n)=>[n,...n.querySelectorAll("*")].map(e=>getComputedStyle(e).pointerEvents)')
       assert pointer_events and all(value=='none' for value in pointer_events),pointer_events
+      hover_exits=hidden_or_removed_exit_help()
+      # Genuine keyboard navigation without activating a clinical action.
+      # Tab away closes this monitor help; Shift+Tab must restore focus/help.
+      monitor.press('Tab')
+      expect(monitor).not_to_be_focused()
+      page.wait_for_function('(id)=>{const tips=Array.from(document.querySelectorAll(\'[role="tooltip"]\')).filter(n=>n.id===id);return tips.length===0||tips.every(n=>n.getAttribute("data-exiting")==="true"&&Array.from(n.querySelectorAll(\'[data-testid="stTooltipContent"]\')).every(e=>getComputedStyle(e).visibility==="hidden"))}',arg=tooltip_id,timeout=15000)
+      tab_exits=hidden_or_removed_exit_help()
+      page.keyboard.press('Shift+Tab')
+      expect(monitor).to_be_focused()
+      expect(trigger).to_have_attribute('aria-describedby',re.compile('.+'),timeout=15000)
+      keyboard_tooltip_id=trigger.get_attribute('aria-describedby')
+      keyboard_root=page.locator(f'[role="tooltip"][id="{keyboard_tooltip_id}"]')
+      expect(keyboard_root).not_to_have_attribute('data-exiting','true')
+      keyboard_tooltip=keyboard_root.locator('[data-testid="stTooltipContent"]')
+      expect(keyboard_tooltip).to_be_visible(timeout=15000)
+      expect(keyboard_tooltip).to_have_text(help_text,use_inner_text=True)
+      keyboard_exits=hidden_or_removed_exit_help()
+      assert settled_history()==before_history,'Hover and Tab must not execute an action'
       tooltip_probe={'id':tooltip_id,'help':help_text,'pointer_events':pointer_events,
+                     'hover_exit_layers':hover_exits,'tab_exit_layers':tab_exits,
+                     'keyboard_focus_tooltip_id':keyboard_tooltip_id,'keyboard_help_visible':True,
+                     'keyboard_exit_layers':keyboard_exits,
                      'before_count':page.locator('.history-item').count(),
                      'before_time':page.locator('.history-time').first.inner_text()}
       target=button.bounding_box()
@@ -135,6 +162,7 @@ def main():
       expect(page.locator('[data-testid="stApp"]')).to_have_attribute('data-test-script-state','notRunning',timeout=15000)
       expect(page.get_by_text(completion,exact=True)).to_have_count(1,timeout=15000)
       expect(page.get_by_text(completion,exact=True)).to_be_visible(timeout=15000)
+      hidden_or_removed_exit_help()  # exits must not reappear on a result page without action triggers
      else:
       settled_history(before_history,'changed')
       expect(page.locator('.history-panel')).not_to_have_text(before_history,use_inner_text=True,timeout=15000)
@@ -145,7 +173,7 @@ def main():
       def elapsed(value):
        minutes,seconds=map(int,value.split(':'));return 60*minutes+seconds
       assert elapsed(after_time)==elapsed(tooltip_probe['before_time'])+30,(tooltip_probe,after_time)
-      tooltip_probe.update(after_time=after_time,after_count=page.locator('.history-item').count(),status='PASS')
+      tooltip_probe.update(after_time=after_time,after_count=page.locator('.history-item').count(),after_click_exit_layers=hidden_or_removed_exit_help(),status='PASS')
       status.setdefault('tooltip_single_click_checks',[]).append(tooltip_probe)
     def finish_academy(completion='',skip=()):
      for aid in ACADEMY:
