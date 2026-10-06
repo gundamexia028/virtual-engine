@@ -7,7 +7,7 @@ import os,sys,json,html
 from pathlib import Path
 if os.environ.get('VE_AUDIT_BROWSER_FIXTURE')!='1':
  raise RuntimeError('This test fixture is not a production entry point.')
-ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'app'))
+ROOT=Path(os.environ.get('VE_WORKFLOW_ROOT',Path(__file__).resolve().parents[1])).resolve();sys.path.insert(0,str(ROOT/'app'))
 import streamlit as st
 import streamlit_app as app
 from peds_anaphylaxis_sim.scenario_loader import load_scenario_by_role
@@ -37,5 +37,6 @@ st.sidebar.button('重新开始审计病例',on_click=lambda:seed(st.session_sta
 sim=st.session_state.active_simulator
 app.render_simulation()
 # A DOM oracle observes the real simulator after rendering; never replaces UI logic.
-state={'session_id':st.session_state.get('session_id'),'case':st.session_state.get('_audit_seeded'),'t':sim.state.t,'log_n':len(sim.log),'score':sim.display_score(),'vitals':sim.state.vitals,'flags':sim.state.flags,'valid':sim.action_valid_time,'weight':sim.state.weight_kg,'end':sim.is_done()}
+report=sim.build_report()
+state={'session_id':st.session_state.get('session_id'),'case':st.session_state.get('_audit_seeded'),'t':sim.state.t,'log_n':len(sim.log),'score':sim.display_score(),'vitals':sim.state.vitals,'flags':sim.state.flags,'valid':sim.action_valid_time,'weight':sim.state.weight_kg,'end':sim.is_done(),'critical_missing':report['critical_missing'],'process_safety_issues':report['process_safety_issues'],'last_actions':[dict(e.data,action_id=e.message) for e in sim.log if e.kind=='action'][-5:]}
 st.markdown('<div id="audit-state" style="white-space:pre-wrap">'+html.escape(json.dumps(state,ensure_ascii=False,allow_nan=False))+'</div>',unsafe_allow_html=True)

@@ -1,5 +1,10 @@
 # VERSION_HISTORY
 
+## V1.3.9-audit.2（2026-10-06，未发布）
+
+C01–C05 收口详见 `audit/PATCH_1.3.9-audit.2.zh-CN.md`（docs 下为 `../audit/`）。补丁未提交、未部署，最终验证见 `audit/patch_acceptance_status.json`。下方为原有历史记录，保留不改写。
+
+
 ## V1.3.8 competition评审候选（2026-07-04，未发布）
 
 * 基线：`feature/modularization-stage-3`完成后的V1.3.8。

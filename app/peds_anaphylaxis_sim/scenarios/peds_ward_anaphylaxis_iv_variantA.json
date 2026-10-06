@@ -517,7 +517,8 @@
       },
       "effects": {
         "set_flags": {
-          "stopped_infusion": false
+          "stopped_infusion": false,
+          "infusion_running": true
         },
         "delta_vitals": {
           "SpO2": -3,

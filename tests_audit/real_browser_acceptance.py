@@ -11,9 +11,9 @@ ACADEMY=['allergy_identification','stop_infusion','call_help','high_flow_oxygen'
 CLINICAL=['stop_infusion','call_help','abc_assess','high_flow_oxygen','shock_position','connect_monitor','check_bp','im_epinephrine','fluid_bolus','reassess_first','bronchodilator','steroid','reassess_second','family_explain','sbar_handoff']
 CASES=[f'{system}_{role}_{mode}' for system in ('clinical','academy') for role in ('initial','variant') for mode in ('coach','exam')]
 def main():
- p=argparse.ArgumentParser();p.add_argument('--out',type=Path,required=True);p.add_argument('--chromium');a=p.parse_args();out=a.out.resolve();out.mkdir(parents=True,exist_ok=True)
+ p=argparse.ArgumentParser();p.add_argument('--out',type=Path,required=True);p.add_argument('--chromium');p.add_argument('--repo',type=Path,default=ROOT,help='Read-only source root; always cloned for testing');a=p.parse_args();out=a.out.resolve();out.mkdir(parents=True,exist_ok=True)
  missing=[x for x in ('streamlit','playwright') if importlib.util.find_spec(x) is None]
- status={'status':'BLOCKED','missing':missing,'app_interaction_cases_executed':0,'production_auth_smoke_executed':False,'case_results':[],'fixture_scope':'real production rendering with seeded synthetic participant/phase; not full registration E2E','online_writes':False}
+ status={'status':'BLOCKED','missing':missing,'app_interaction_cases_executed':0,'production_auth_smoke_executed':False,'case_results':[],'fixture_scope':'real production rendering with seeded synthetic participant/phase; not full registration E2E','online_writes':False,'workflow_defect_checks':[],'source_root':str(a.repo.resolve())}
  exe=a.chromium or shutil.which('chromium') or shutil.which('chromium-browser')
  if exe:
   q=subprocess.run([exe,'--version'],capture_output=True,text=True);status['chromium_version']=q.stdout.strip()
@@ -36,7 +36,9 @@ def main():
   raise RuntimeError(name+' server startup timeout')
  try:
   with tempfile.TemporaryDirectory(prefix='ve-browser-offline-') as tmp:
-   clone=Path(tmp)/'repo';shutil.copytree(ROOT,clone,ignore=shutil.ignore_patterns('__pycache__','.git','.venv','audit_results','htmlcov','runs','runs_web','.runtime','secrets.toml','org_access_codes.json'))
+   clone=Path(tmp)/'repo';shutil.copytree(a.repo.resolve(),clone,ignore=shutil.ignore_patterns('__pycache__','.git','.venv','audit_results','htmlcov','runs','runs_web','.runtime','secrets.toml','org_access_codes.json'))
+   # The current test fixture observes the selected source tree without editing it.
+   shutil.copy2(ROOT/'tests_audit/browser_fixture_app.py',clone/'tests_audit/browser_fixture_app.py')
    env=dict(os.environ);env.update(APP_MODE='production',VE_AUDIT_BROWSER_FIXTURE='1',APP_ACCESS_CODE=secrets.token_urlsafe(24),ADMIN_PASSWORD=secrets.token_urlsafe(32),AUTH_CONTEXT_SIGNING_KEY=secrets.token_urlsafe(40),PEDSIM_RESULTS_DIR=str(Path(tmp)/'runs'),PEDSIM_DRAFTS_DIR=str(Path(tmp)/'drafts'))
    for k in ('SUPABASE_URL','SUPABASE_KEY','SUPABASE_ANON_KEY','SUPABASE_SERVICE_ROLE_KEY'):env[k]=''
    # Production authentication intentionally reads st.secrets, not environment fallbacks.
@@ -74,13 +76,72 @@ def main():
       input_label={'epinephrine':'本次肌注总剂量（mg）','fluid':'本次快速补液容量（ml）','steroid':'本次甲泼尼龙剂量（mg）'}[kind]
       page.get_by_role('spinbutton',name=input_label,exact=True).fill(str(v));page.locator(f'.st-key-confirm_{kind}_{sid}').get_by_role('button').click()
      changed(before)
+    def reset_case():
+     before=read();page.get_by_role('button',name='重新开始审计病例',exact=True).click();changed(before)
+     fresh=read();assert fresh['t']==0 and fresh['score']==0 and fresh['session_id']!=before['session_id'],fresh
+     assert not fresh['flags'].get('order_violations',{}),fresh
+    def select_case(case):
+     if read()['case']!=case:
+      page.get_by_label('审计病例组合',exact=True).click();page.get_by_role('option',name=case,exact=True).click();page.wait_for_function('(c)=>document.querySelector("#audit-state")&&JSON.parse(document.querySelector("#audit-state").textContent).case===c',arg=case)
+    def advance():
+     before=read();page.locator(f'.st-key-advance_time_{before["session_id"]}').get_by_role('button').click();changed(before)
+     assert read()['t']==before['t']+30,(before,read())
     for case in CASES:
      if read()['case']!=case:
       page.get_by_label('审计病例组合',exact=True).click();page.get_by_role('option',name=case,exact=True).click();page.wait_for_function('(c)=>document.querySelector("#audit-state")&&JSON.parse(document.querySelector("#audit-state").textContent).case===c',arg=case)
-     for aid in ACADEMY if case.startswith('academy') else CLINICAL:action(aid)
+     for aid in ACADEMY if case.startswith('academy') else CLINICAL:
+      action(aid)
+      if aid=='academy_reassess':
+       before_repeat=read();action(aid);after_repeat=read()
+       assert after_repeat['t']==before_repeat['t']+30 and after_repeat['score']==before_repeat['score'],(case,before_repeat,after_repeat)
+       assert after_repeat['log_n']>before_repeat['log_n'] and after_repeat['valid']['academy_reassess']==before_repeat['valid']['academy_reassess']
+       assert after_repeat['last_actions'][-1]['status']=='valid' and after_repeat['last_actions'][-1]['gained']==0
+       status['workflow_defect_checks'].append({'check':'C04_repeat_reassessment','case':case,'status':'PASS'})
      final=read();assert final['end'][0] and final['score']==100,(case,final)
      status['case_results'].append({'case':case,'status':'PASS','t':final['t'],'score':final['score'],'end':final['end']});status['app_interaction_cases_executed']+=1
      page.screenshot(path=str(out/(case+'.png')),full_page=True)
+     if case.startswith('academy') and case.endswith('_coach'):
+      frozen=read();page.get_by_role('button',name='我已确认完成抢救',exact=True).click()
+      expect(page.get_by_role('button',name='返回查看',exact=True)).to_be_visible()
+      assert page.get_by_role('button',name='继续操作',exact=True).count()==0
+      page.screenshot(path=str(out/(case+'_terminal_return_view.png')),full_page=True)
+      page.get_by_role('button',name='返回查看',exact=True).click()
+      expect(page.get_by_role('button',name='我已确认完成抢救',exact=True)).to_be_visible()
+      for key in ('t','score','log_n','vitals','valid','end'):
+       assert read()[key]==frozen[key],(case,key,read()[key],frozen[key])
+      expect(page.locator(f'.st-key-advance_time_{frozen["session_id"]}').get_by_role('button')).to_be_disabled()
+      for aid in ACADEMY if case.startswith('academy') else CLINICAL:
+       expect(page.locator(f'.st-key-action_{frozen["session_id"]}_{aid}').get_by_role('button')).to_be_disabled()
+      status['workflow_defect_checks'].append({'check':'C03_terminal_return_view','case':case,'status':'PASS'})
+    # Defect-focused UI paths are distinct from the eight complete paths above.
+    for case in CASES:
+     select_case(case);reset_case()
+     if case.startswith('clinical'):
+      for omitted in ('abc_assess','shock_position'):
+       for aid in CLINICAL:
+        if aid!=omitted:action(aid)
+       observed=read();assert observed['end'][1] not in ('success','standard_assessment_completed'),(case,omitted,observed)
+       assert observed['critical_missing'],(case,omitted,observed)
+       status['workflow_defect_checks'].append({'check':'C01_missing_'+omitted,'case':case,'status':'PASS'})
+       reset_case()
+      for aid in ('stop_infusion','call_help','high_flow_oxygen','continue_infusion'):action(aid)
+      resumed=read();assert resumed['flags']['infusion_running'] is True and resumed['flags']['stopped_infusion'] is False,resumed
+      for _ in range(4):advance()
+      after_wait=read();assert after_wait['vitals']['SBP']<resumed['vitals']['SBP'],(resumed,after_wait)
+      status['workflow_defect_checks'].append({'check':'C02_resume_no_freeze','case':case,'status':'PASS'})
+      reset_case()
+     else:
+      # A real premature click, followed by a full corrective path.
+      action('academy_reassess')
+      for aid in ACADEMY:action(aid)
+      recovered=read();assert recovered['end'][0] and recovered['score']<100,recovered
+      reason=recovered['flags']['order_violations']['academy_reassess']['reason']
+      assert any(reason in issue for issue in recovered['process_safety_issues']),recovered
+      status['workflow_defect_checks'].append({'check':'C05_corrected_history_visible','case':case,'status':'PASS'})
+      reset_case();action('stop_infusion')
+      assert page.locator(f'.st-key-action_{read()["session_id"]}_continue_infusion').count()==0
+      assert read()['flags']['infusion_running'] is False and read()['flags']['stopped_infusion'] is True
+      status['workflow_defect_checks'].append({'check':'academy_continue_observation_isolation','case':case,'status':'PASS'})
     # An idle render and rapid action sequence must preserve all principal regions.
     before_reset=read();page.get_by_role('button',name='重新开始审计病例',exact=True).click();changed(before_reset)
     action('stop_infusion');action('call_help');before=read()
@@ -98,7 +159,7 @@ def main():
     assert not console,console
     (out/'page_errors.json').write_text(json.dumps(console,ensure_ascii=False,indent=2))
     context.tracing.stop(path=str(out/'playwright_trace.zip'));context.close();browser.close()
-    status['status']='PASS_SCOPED_BROWSER_INTEGRATION';status['reason']='Production entry auth/mode smoke + eight seeded case/mode render workflows. Full registration/SUS/admin E2E still outside this fixture.'
+    status['status']='PASS_SCOPED_BROWSER_INTEGRATION';status['reason']='Production entry auth/mode smoke + eight seeded workflows + C01-C05 defect checks and reset isolation. Full registration/SUS/admin E2E remains outside this fixture.'
  except Exception as exc:
   status.update(status='FAIL',error=repr(exc),traceback=traceback.format_exc())
   try:

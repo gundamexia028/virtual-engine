@@ -25,8 +25,8 @@ SCENARIO_DIR = SCENARIO_DIRECTORY
 EXPECTED_SCENARIO_HASHES = {
     "peds_ward_allergy_academy_initial.json": "3921241d529b28d8d4309455eab6a017e4899faa89779e12d336f1712e8d976b",
     "peds_ward_allergy_academy_variant.json": "c379745d516e060df4b630674a223d0b01cb9d082032db2ddb172d34149e1e5f",
-    "peds_ward_anaphylaxis_iv_initial.json": "38c4d0e94e4b6e4fe4e5e2013ccd2f779b3f268673e5ea3d22cde567fb5432b1",
-    "peds_ward_anaphylaxis_iv_variantA.json": "07fc8f012712160fe03d27dae81270429725249c0f61c3b4a307d6687f735d8b",
+    "peds_ward_anaphylaxis_iv_initial.json": "8d955637e1439f5ca0ec07fa621396de8079d210542526ee01dfe6cb53b0be82",
+    "peds_ward_anaphylaxis_iv_variantA.json": "c5ccbf0e2f188784e8dcd596c79eb33fdf35be56d1aacfa913bc15f14161a0bf",
 }
 EXPECTED_VITAL_KEYS = {"HR", "RR", "SBP", "DBP", "SpO2", "Temp"}
 ALLOWED_SCRIPT_ROLES = {"initial", "variant", "academy_initial", "academy_variant"}

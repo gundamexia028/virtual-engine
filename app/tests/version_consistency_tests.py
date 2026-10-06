@@ -14,8 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-SYSTEM_VERSION = "V1.3.9-audit.1"
-PACKAGE_VERSION = "1.3.9-audit.1"
+SYSTEM_VERSION = "V1.3.9-audit.2"
+PACKAGE_VERSION = "1.3.9-audit.2"
 
 HISTORICAL_FILE_HASHES = {
     "docs/V1.2.11_research_collection_locked_notes.md": "195b5f68e8aff707462f2414f34f06f995e7eb34b45e6b74e09c3a028d86a343",
@@ -34,8 +34,8 @@ HISTORICAL_FILE_HASHES = {
 SCENARIO_FILE_HASHES = {
     "peds_anaphylaxis_sim/scenarios/peds_ward_allergy_academy_initial.json": "3921241d529b28d8d4309455eab6a017e4899faa89779e12d336f1712e8d976b",
     "peds_anaphylaxis_sim/scenarios/peds_ward_allergy_academy_variant.json": "c379745d516e060df4b630674a223d0b01cb9d082032db2ddb172d34149e1e5f",
-    "peds_anaphylaxis_sim/scenarios/peds_ward_anaphylaxis_iv_initial.json": "38c4d0e94e4b6e4fe4e5e2013ccd2f779b3f268673e5ea3d22cde567fb5432b1",
-    "peds_anaphylaxis_sim/scenarios/peds_ward_anaphylaxis_iv_variantA.json": "07fc8f012712160fe03d27dae81270429725249c0f61c3b4a307d6687f735d8b",
+    "peds_anaphylaxis_sim/scenarios/peds_ward_anaphylaxis_iv_initial.json": "8d955637e1439f5ca0ec07fa621396de8079d210542526ee01dfe6cb53b0be82",
+    "peds_anaphylaxis_sim/scenarios/peds_ward_anaphylaxis_iv_variantA.json": "c5ccbf0e2f188784e8dcd596c79eb33fdf35be56d1aacfa913bc15f14161a0bf",
 }
 
 
@@ -89,7 +89,7 @@ class VersionConsistencyTests(unittest.TestCase):
         actual = {path: file_hash(path) for path in HISTORICAL_FILE_HASHES}
         self.assertEqual(actual, HISTORICAL_FILE_HASHES)
 
-    def test_scenario_and_schema_versions_are_unchanged(self):
+    def test_patch_scenario_hashes_and_unchanged_schema_version(self):
         actual = {path: file_hash(path) for path in SCENARIO_FILE_HASHES}
         self.assertEqual(actual, SCENARIO_FILE_HASHES)
         for path in SCENARIO_FILE_HASHES:

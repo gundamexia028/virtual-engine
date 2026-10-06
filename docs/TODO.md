@@ -1,5 +1,10 @@
 # TODO.md
 
+## 本轮五项收口
+
+C01–C05 收口详见 `audit/PATCH_1.3.9-audit.2.zh-CN.md`（docs 下为 `../audit/`）。补丁未提交、未部署，最终验证见 `audit/patch_acceptance_status.json`。下方为原有历史记录，保留不改写。
+
+
 ## 1. 文件说明
 
 本文件记录第一次只读代码接管审计、独立环境建立和首次本地离线运行验证后的待办事项。
