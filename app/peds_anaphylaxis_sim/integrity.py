@@ -9,7 +9,7 @@ import math
 from copy import deepcopy
 from functools import lru_cache, wraps
 
-ENGINE_REVISION = "1.3.9-audit.2"
+ENGINE_REVISION = "1.3.9-audit.3"
 
 
 def assert_finite_tree(value, path="root", depth=0):

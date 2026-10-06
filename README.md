@@ -1,3 +1,13 @@
+# Virtual-Engine — 1.3.9-audit.3
+
+当前交付修订为r3，请使用r3归档与source_manifest_r3.json；旧r2归档保留供比对，不用于本次发布。
+
+演示评审版可靠性修复候选，基线提交 `f243720049cc77e4d9cd05030853b47aa0bebfa6`。只修改独立副本；未提交、未部署、未迁移生产数据。
+
+- [本轮修复和兼容性说明](audit/PATCH_1.3.9-audit.3.zh-CN.md)
+- [演示启动、核验与回退](audit/DEMO_1.3.9-audit.3.zh-CN.md)
+- 本轮验收最终以 `audit/audit3_acceptance_status.json` 为准；下面均为历史交接材料。
+
 # Virtual-Engine — 1.3.9-audit.2
 
 五项已确认流程缺陷的独立补丁候选，尚未提交或部署。当前说明和结果以 [补丁说明](audit/PATCH_1.3.9-audit.2.zh-CN.md) 与 audit/patch_acceptance_status.json 为准。源码基线为已部署提交 4a3e619b1287ecc16b5a9a9f80e82fea9502d39d；下方保留 audit.1 历史交接状态，不代表 audit.2 最新测试结果。

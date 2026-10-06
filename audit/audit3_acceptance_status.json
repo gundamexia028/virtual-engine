@@ -1,0 +1,65 @@
+{
+  "version": "1.3.9-audit.3",
+  "baseline_commit": "f243720049cc77e4d9cd05030853b47aa0bebfa6",
+  "scope": "competition demo-review candidate only; shared production tests use synthetic temporary data",
+  "status": "OFFLINE_PASS_FINAL_BROWSER_CI_PENDING",
+  "source_frozen": true,
+  "online_or_real_data_writes": false,
+  "clinical_parameters_or_scenario_json_changed": false,
+  "schema_or_permissions_changed": false,
+  "tests": {
+    "audit_unit_methods": 94,
+    "audit_unit_status": "PASS",
+    "legacy_scripts": 16,
+    "legacy_unittest_methods": 294,
+    "legacy_status": "PASS",
+    "matrix_probes": 11768,
+    "directed_witnesses": 68,
+    "matrix_status": "PASS",
+    "independent_engine_random_chains": 1280,
+    "independent_engine_commands": 11699,
+    "independent_engine_standard_paths": 8,
+    "independent_engine_omission_paths": 108,
+    "independent_engine_resuscitation_permutations": 24,
+    "independent_storage_methods": 11,
+    "independent_ui_methods": 8,
+    "independent_round_status": "R3_FINAL_FIXED_PRODUCT_RECHECK_PASSED_NO_NEW_CONFIRMED_DEFECTS",
+    "local_browser_interactions": 0,
+    "local_browser_status": "FINAL_R3_BROWSER_NOT_EXECUTED_LOCALLY_PRIOR_CHROMIUM_SOCKET_PERMISSION_BLOCK",
+    "external_database_status": "STUB_ONLY_NOT_E2E",
+    "competition_real_entry_and_version_methods": 3,
+    "display_only_and_independent_timeline_methods": 7,
+    "competition_clinical_progression_methods": 2,
+    "independent_competition_marker_boundary_checks": 9
+  },
+  "release_gates": [
+    "Run final enhanced browser runner in Python3.13/3.14 CI",
+    "Full app process Reboot after deploying approved source; no data cleanup",
+    "Complete requested four real-browser review rounds on final candidate, including 1180/1366/390 label visibility and single-click interaction",
+    "Verify final remote commit and source hashes before deployment"
+  ],
+  "limitations": [
+    "Local JSONL corruption recovery is tested only with synthetic temporary files; corrupt old bytes remain intact",
+    "Read-only SUS overlay needs the matching local questionnaire on that instance; no cloud persistence migration or cloud schema validation",
+    "Standalone academy stage result is not a completed full course",
+    "No live database, production data, or other simulation changed",
+    "Static CSS and AppTest do not establish pixel correctness; scoped wrapping and three viewports still require actual browser execution"
+  ],
+  "archive_revision": "r3",
+  "local_python": "3.12.14",
+  "ci_python_matrix": [
+    "3.13",
+    "3.14"
+  ],
+  "engine_revision": "1.3.9-audit.3",
+  "old_snapshot_compatibility": "Old app/engine drafts rejected without deleting unexpired bytes; no automatic migration; complete active exercises before rollout",
+  "live_entry_issue": "audit.2 missing display_score disappeared after complete app Reboot and new session; no speculative API fallback was added; require full Reboot after release updates",
+  "git_mutations": false,
+  "git_readonly_diff_used": true,
+  "r3_changes": [
+    "Scoped tooltip-wrapped action label CSS; wider finish button column",
+    "Chinese history/results labels while retaining raw report values",
+    "Explicit dose/volume/count/time units; steroid_min_mg is not a timestamp",
+    "Competition-only explicit baseline/training/posttest progression after required questionnaire, with anonymous identity, fresh stage sessions, stale-call and prior-stage guards"
+  ]
+}

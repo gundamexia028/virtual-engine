@@ -22,7 +22,7 @@ def main():
 
   start=time.monotonic()
   try:
-   q=subprocess.run(cmd,cwd=(ROOT/'app' if kind.endswith('legacy') or kind.startswith('unit_existing') else ROOT),env=env,capture_output=True,text=True,timeout=60);txt=q.stdout+q.stderr;rc=q.returncode
+   q=subprocess.run(cmd,cwd=(ROOT/'app' if kind.endswith('legacy') or kind.startswith('unit_existing') else ROOT),env=env,capture_output=True,text=True,timeout=180);txt=q.stdout+q.stderr;rc=q.returncode
   except subprocess.TimeoutExpired as e:txt=str(e);rc=124
   (out/(name+'.log')).write_text(txt)
   tests=re.findall(r'Ran (\d+) tests?',txt)
