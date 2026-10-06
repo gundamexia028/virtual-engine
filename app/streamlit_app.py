@@ -4612,6 +4612,14 @@ def inject_compact_css() -> None:
             max-height: none !important;
             line-height: 1.25 !important;
         }
+        /* Streamlit portals read-only action help outside the action widget.
+           A focused trigger can keep it open over the next button. Let clicks
+           pass through only while action help is open; interactive tooltips,
+           dialogs, menus and their overlay containers retain normal events. */
+        body:has([class*="st-key-action_"] [data-testid="stTooltipHoverTarget"][aria-describedby]) [data-overlay-container="true"] [role="tooltip"] [data-testid="stTooltipContent"]:not(:has(a, button, input, select, textarea, [role="button"], [contenteditable="true"], [tabindex]:not([tabindex="-1"]))),
+        body:has([class*="st-key-action_"] [data-testid="stTooltipHoverTarget"][aria-describedby]) [data-overlay-container="true"] [role="tooltip"] [data-testid="stTooltipContent"]:not(:has(a, button, input, select, textarea, [role="button"], [contenteditable="true"], [tabindex]:not([tabindex="-1"]))) * {
+            pointer-events: none !important;
+        }
         [data-testid="stSidebar"] .stButton > button {
             min-height: 2.30rem !important;
             padding: 0.28rem 0.48rem !important;
