@@ -38,4 +38,4 @@ sim=st.session_state.active_simulator
 app.render_simulation()
 # A DOM oracle observes the real simulator after rendering; never replaces UI logic.
 state={'session_id':st.session_state.get('session_id'),'case':st.session_state.get('_audit_seeded'),'t':sim.state.t,'log_n':len(sim.log),'score':sim.display_score(),'vitals':sim.state.vitals,'flags':sim.state.flags,'valid':sim.action_valid_time,'weight':sim.state.weight_kg,'end':sim.is_done()}
-st.markdown('<pre id="audit-state" style="white-space:pre-wrap">'+html.escape(json.dumps(state,ensure_ascii=False,allow_nan=False))+'</pre>',unsafe_allow_html=True)
+st.markdown('<div id="audit-state" style="white-space:pre-wrap">'+html.escape(json.dumps(state,ensure_ascii=False,allow_nan=False))+'</div>',unsafe_allow_html=True)
