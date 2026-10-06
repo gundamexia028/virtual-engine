@@ -1,0 +1,13 @@
+{
+  "status": "BLOCKED",
+  "missing": [
+    "streamlit"
+  ],
+  "app_interaction_cases_executed": 0,
+  "production_auth_smoke_executed": false,
+  "case_results": [],
+  "fixture_scope": "real production rendering with seeded synthetic participant/phase; not full registration E2E",
+  "online_writes": false,
+  "chromium_version": "Chromium 144.0.7559.96 built on Debian GNU/Linux 13 (trixie)",
+  "reason": "Missing real application runtime; NO fake Streamlit/server substituted."
+}

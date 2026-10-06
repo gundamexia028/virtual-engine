@@ -50,3 +50,7 @@ Desktop.ini
 .results.lock
 reports/
 training_drafts/
+
+# Local audit output (never production data)
+audit_results/
+runtime-resolved.txt

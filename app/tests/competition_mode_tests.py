@@ -315,7 +315,7 @@ class AcademyFlowAndUiTests(unittest.TestCase):
         self.assertEqual(stage_report_key("课后考核"), "posttest")
 
     def test_score_snapshot_does_not_change_report_values(self):
-        report = {"score": 80, "max_score": 100, "penalties": 5}
+        report = {"score": 80, "raw_score": 85, "max_score": 100, "penalties": 5}
         snapshot = score_snapshot(report)
         self.assertEqual(snapshot["score"], 80)
         self.assertEqual(snapshot["raw_score"], 85)

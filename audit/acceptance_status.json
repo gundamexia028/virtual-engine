@@ -1,0 +1,256 @@
+{
+  "status": "HOLD_REAL_BROWSER_AND_REAL_STREAMLIT_ACCEPTANCE",
+  "audit_unit_methods": 43,
+  "legacy_scripts": 16,
+  "legacy_pass_with_explicit_original_test_double": 14,
+  "legacy_runtime_blocked": 2,
+  "legacy_unit_methods_passed": 272,
+  "browser_cases_executed": 0,
+  "online_writes": false,
+  "results": [
+    {
+      "name": "audit_unit",
+      "kind": "actual_engine_and_controller_unit_tests",
+      "status": "PASS",
+      "returncode": 0,
+      "unittest_methods": 43,
+      "seconds": 8.569,
+      "source": "FINAL_VERIFIED/unit/summary.json"
+    },
+    {
+      "name": "academy_questionnaire_idempotency_tests",
+      "kind": "unit_existing_streamlit_double_NOT_BROWSER",
+      "status": "PASS",
+      "returncode": 0,
+      "unittest_methods": 10,
+      "seconds": 10.481,
+      "source": "FINAL_VERIFIED/legacy_A/summary.json"
+    },
+    {
+      "name": "clinical_result_page_tests",
+      "kind": "unit_existing_streamlit_double_NOT_BROWSER",
+      "status": "BLOCKED_RUNTIME",
+      "returncode": 1,
+      "unittest_methods": null,
+      "seconds": 1.05,
+      "source": "FINAL_VERIFIED/legacy_A/summary.json"
+    },
+    {
+      "name": "competition_mode_tests",
+      "kind": "unit_existing_streamlit_double_NOT_BROWSER",
+      "status": "PASS",
+      "returncode": 0,
+      "unittest_methods": 32,
+      "seconds": 1.226,
+      "source": "FINAL_VERIFIED/legacy_A/summary.json"
+    },
+    {
+      "name": "competition_stability_tests",
+      "kind": "unit_existing_streamlit_double_NOT_BROWSER",
+      "status": "PASS",
+      "returncode": 0,
+      "unittest_methods": 40,
+      "seconds": 1.14,
+      "source": "FINAL_VERIFIED/legacy_A/summary.json"
+    },
+    {
+      "name": "credential_security_tests",
+      "kind": "unit_existing_streamlit_double_NOT_BROWSER",
+      "status": "PASS",
+      "returncode": 0,
+      "unittest_methods": 20,
+      "seconds": 1.278,
+      "source": "FINAL_VERIFIED/legacy_A/summary.json"
+    },
+    {
+      "name": "flow_strategy_tests",
+      "kind": "unit_existing_streamlit_double_NOT_BROWSER",
+      "status": "PASS",
+      "returncode": 0,
+      "unittest_methods": 27,
+      "seconds": 1.298,
+      "source": "FINAL_VERIFIED/legacy_A/summary.json"
+    },
+    {
+      "name": "full_workflow_validation",
+      "kind": "unit_existing_streamlit_double_NOT_BROWSER",
+      "status": "PASS",
+      "returncode": 0,
+      "unittest_methods": 16,
+      "seconds": 1.32,
+      "source": "FINAL_VERIFIED/legacy_A/summary.json"
+    },
+    {
+      "name": "golden_behavior_tests",
+      "kind": "unit_existing_streamlit_double_NOT_BROWSER",
+      "status": "PASS",
+      "returncode": 0,
+      "unittest_methods": 16,
+      "seconds": 1.208,
+      "source": "FINAL_VERIFIED/legacy_A/summary.json"
+    },
+    {
+      "name": "org_credential_security_tests",
+      "kind": "unit_existing_streamlit_double_NOT_BROWSER",
+      "status": "PASS",
+      "returncode": 0,
+      "unittest_methods": 20,
+      "seconds": 1.455,
+      "source": "FINAL_VERIFIED/legacy_B/summary.json"
+    },
+    {
+      "name": "organization_authorization_tests",
+      "kind": "unit_existing_streamlit_double_NOT_BROWSER",
+      "status": "PASS",
+      "returncode": 0,
+      "unittest_methods": 32,
+      "seconds": 1.484,
+      "source": "FINAL_VERIFIED/legacy_B/summary.json"
+    },
+    {
+      "name": "review_live_vitals_hotfix_tests",
+      "kind": "unit_existing_streamlit_double_NOT_BROWSER",
+      "status": "PASS",
+      "returncode": 0,
+      "unittest_methods": 4,
+      "seconds": 1.116,
+      "source": "FINAL_VERIFIED/legacy_B/summary.json"
+    },
+    {
+      "name": "scenario_contract_tests",
+      "kind": "unit_existing_streamlit_double_NOT_BROWSER",
+      "status": "PASS",
+      "returncode": 0,
+      "unittest_methods": 20,
+      "seconds": 1.159,
+      "source": "FINAL_VERIFIED/legacy_B/summary.json"
+    },
+    {
+      "name": "scenario_loader_tests",
+      "kind": "unit_existing_streamlit_double_NOT_BROWSER",
+      "status": "PASS",
+      "returncode": 0,
+      "unittest_methods": 22,
+      "seconds": 1.032,
+      "source": "FINAL_VERIFIED/legacy_B/summary.json"
+    },
+    {
+      "name": "session_recovery_tests",
+      "kind": "unit_existing_streamlit_double_NOT_BROWSER",
+      "status": "PASS",
+      "returncode": 0,
+      "unittest_methods": 13,
+      "seconds": 1.299,
+      "source": "FINAL_VERIFIED/legacy_B/summary.json"
+    },
+    {
+      "name": "version_consistency_tests",
+      "kind": "unit_existing_streamlit_double_NOT_BROWSER",
+      "status": "BLOCKED_RUNTIME",
+      "returncode": 1,
+      "unittest_methods": null,
+      "seconds": 1.11,
+      "source": "FINAL_VERIFIED/legacy_B/summary.json"
+    },
+    {
+      "name": "matrix_pairs",
+      "kind": "bounded_deterministic_engine_enumeration",
+      "status": "PASS",
+      "returncode": 0,
+      "unittest_methods": null,
+      "seconds": 21.575,
+      "source": "FINAL_VERIFIED/matrix/progress.json"
+    },
+    {
+      "name": "matrix_permutations",
+      "kind": "bounded_deterministic_engine_enumeration",
+      "status": "PASS",
+      "returncode": 0,
+      "unittest_methods": null,
+      "seconds": 12.453,
+      "source": "FINAL_VERIFIED/matrix/progress.json"
+    },
+    {
+      "name": "smoke_tests",
+      "kind": "unit_existing_streamlit_double_NOT_BROWSER",
+      "status": "PASS",
+      "returncode": 0,
+      "unittest_methods": null,
+      "seconds": 1.275,
+      "source": "FINAL_VERIFIED/matrix_tail/summary.json"
+    },
+    {
+      "name": "matrix_numerics",
+      "kind": "bounded_deterministic_engine_enumeration",
+      "status": "PASS",
+      "returncode": 0,
+      "unittest_methods": null,
+      "seconds": 4.669,
+      "source": "FINAL_VERIFIED/matrix_tail/summary.json"
+    },
+    {
+      "name": "matrix_time_paths",
+      "kind": "bounded_deterministic_engine_enumeration",
+      "status": "PASS",
+      "returncode": 0,
+      "unittest_methods": null,
+      "seconds": 1.32,
+      "source": "FINAL_VERIFIED/matrix_tail/summary.json"
+    },
+    {
+      "name": "directed_branches",
+      "kind": "natural_witnesses_and_labeled_synthetic_fixtures",
+      "status": "PASS",
+      "returncode": 0,
+      "unittest_methods": null,
+      "seconds": 1.228,
+      "source": "FINAL_VERIFIED/matrix_tail/summary.json"
+    }
+  ],
+  "orchestration_note": "Long wrapper calls were interrupted. The two successful matrix tasks are taken from the persisted per-task progress, logs and complete JSONL/summary files; they are not claimed as an uninterrupted all-in-one run. Remaining tasks have complete subset-run summaries.",
+  "matrix": [
+    {
+      "source": "FINAL_VERIFIED/matrix/matrix/pairs_summary.json",
+      "counts": {
+        "PASS": 7808
+      },
+      "boundary": "All ordered pairs with replacement from the fresh state: clinical 24^2×4 configs×2 timing variants + academy 20^2×4×2 = 7,808 histories. Numeric actions use canonical valid values. No arbitrary depth or all patient profiles in this section."
+    },
+    {
+      "source": "FINAL_VERIFIED/matrix/matrix/permutations_summary.json",
+      "counts": {
+        "PASS": 2880
+      },
+      "boundary": "All 6! permutations, once each, of academy preparation/check/admin/reassessment/family/SBAR, after the same valid six-action prefix; 720×2 academy cases×2 modes = 2,880 histories; one 30s tick after each action. Not permutations of every system action or arbitrary repeats."
+    },
+    {
+      "source": "FINAL_VERIFIED/matrix_tail/matrix/numerics_summary.json",
+      "counts": {
+        "PASS": 1056
+      },
+      "boundary": "11 actually generated clinical age/weight pairs × 2 cases × 2 modes × 3 numeric APIs × 8 boundary probes = 1,056 trials. Inclusive endpoints checked independently. Separate unit tests cover NaN/Inf/bool/malformed values. Not all real-valued doses."
+    },
+    {
+      "source": "FINAL_VERIFIED/matrix_tail/matrix/time_paths_summary.json",
+      "counts": {
+        "PASS": 24
+      },
+      "boundary": "24 complete trajectories: 4 cases ×2 modes ×3 fixed prefixes, advancing every reachable 30s step until the engine terminates (not forcing time past death). Terminal extra tick must be a no-op. Does not enumerate every history at each time."
+    },
+    {
+      "source": "FINAL_VERIFIED/matrix_tail/matrix/directed_branches_summary.json",
+      "counts": {
+        "PASS": 68
+      },
+      "boundary": "68 named witnesses: 8 standard; 12 natural arrest/CPR/ROSC-or-omission; 4 natural airway/adjunct; 4 natural IV loss/recovery; 12 explicitly synthetic repeat-dose interval boundaries; 28 natural academy unsafe-action/remediation paths. No claim of all reachable histories."
+    }
+  ],
+  "bounded_histories_and_numeric_probes": 11768,
+  "directed_branch_witnesses": 68,
+  "registered_dynamic_rules": 50,
+  "dynamic_rules_with_observed_witness": 42,
+  "unobserved_dynamic_rules": 8,
+  "release_approved": false,
+  "content_review_required": true,
+  "runtime_dependencies_fully_resolved_and_verified": false
+}

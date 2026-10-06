@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 from typing import Any, Dict, Optional
 
 
@@ -157,13 +159,8 @@ def latest_allowed_academy_page(
 def score_snapshot(report: Dict[str, Any]) -> Dict[str, Any]:
     score = report.get("score", 0)
     penalty = report.get("penalties", 0)
-    try:
-        raw_score = float(score or 0) + abs(float(penalty or 0))
-        if raw_score.is_integer():
-            raw_score = int(raw_score)
-    except (TypeError, ValueError):
-        raw_score = score
-    return {
+    raw_score = report.get("raw_score", score)
+    return deepcopy({
         "score": score,
         "raw_score": raw_score,
         "penalties": penalty,
@@ -171,4 +168,4 @@ def score_snapshot(report: Dict[str, Any]) -> Dict[str, Any]:
         "modules": report.get("module_score_summary", {}) or {},
         "issues": report.get("process_safety_issues", []) or [],
         "missing": report.get("critical_missing", []) or [],
-    }
+    })

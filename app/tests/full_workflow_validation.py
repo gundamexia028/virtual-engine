@@ -47,6 +47,8 @@ ACADEMY_STANDARD_ACTIONS = [
     "connect_monitor",
     "check_bp",
     "prepare_rescue_equipment",
+    "academy_medication_check",
+    "academy_assisted_medication",
     "academy_reassess",
     "academy_family_communication",
     "academy_sbar_handoff",
@@ -282,7 +284,7 @@ class FullWorkflowValidationTests(unittest.TestCase):
                 else:
                     sim.apply_action(action_id)
                 exercised += 1
-        self.assertEqual(exercised, 82)
+        self.assertEqual(exercised, 88)
 
     def test_sus_teaching_survey_calculation_and_completion_gate(self):
         self.assertEqual(app.compute_sus_score([5, 1, 5, 1, 5, 1, 5, 1, 5, 1]), 100.0)
@@ -295,7 +297,7 @@ class FullWorkflowValidationTests(unittest.TestCase):
         with patch.object(app, "st", fake):
             self.assertTrue(app._academy_post_test_fully_completed(report, "success"))
             incomplete = json.loads(json.dumps(report))
-            incomplete["key_timeline"]["academy_sbar_handoff"] = None
+            incomplete["action_valid_time"]["academy_sbar_handoff"] = None
             self.assertFalse(app._academy_post_test_fully_completed(incomplete, "success"))
             self.assertFalse(app._academy_post_test_fully_completed(report, "failure"))
 
@@ -406,9 +408,9 @@ class FullWorkflowValidationTests(unittest.TestCase):
         invalid_epi = sim.apply_epinephrine_dose("not-a-number")
         invalid_fluid = sim.apply_fluid_bolus_volume(-1)
         invalid_steroid = sim.apply_steroid_dose("not-a-number")
-        self.assertIn(invalid_epi["status"], {"invalid", "underdose"})
-        self.assertIn(invalid_fluid["status"], {"invalid", "under", "timing_error"})
-        self.assertIn(invalid_steroid["status"], {"invalid", "under", "timing_error"})
+        self.assertEqual(invalid_epi["status"], "invalid_input")
+        self.assertEqual(invalid_fluid["status"], "invalid_input")
+        self.assertEqual(invalid_steroid["status"], "invalid_input")
         self.assertEqual(sum(entry.message == "unknown_action" for entry in sim.log), 2)
 
     def test_clinical_completion_enters_saved_result_state(self):
