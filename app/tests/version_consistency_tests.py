@@ -14,8 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-SYSTEM_VERSION = "V1.3.8"
-PACKAGE_VERSION = "1.3.8"
+SYSTEM_VERSION = "V1.3.9-audit.1"
+PACKAGE_VERSION = "1.3.9-audit.1"
 
 HISTORICAL_FILE_HASHES = {
     "docs/V1.2.11_research_collection_locked_notes.md": "195b5f68e8aff707462f2414f34f06f995e7eb34b45e6b74e09c3a028d86a343",
@@ -32,10 +32,10 @@ HISTORICAL_FILE_HASHES = {
 }
 
 SCENARIO_FILE_HASHES = {
-    "peds_anaphylaxis_sim/scenarios/peds_ward_allergy_academy_initial.json": "ea4b0602126b2d9d93c4a9eb56b7bf95d4b52b6caea3d67acc0b372687adebee",
-    "peds_anaphylaxis_sim/scenarios/peds_ward_allergy_academy_variant.json": "694d19aa42be2ca3151bf730d9eb9836031e4adc578a4a7359948c68b1b4e475",
-    "peds_anaphylaxis_sim/scenarios/peds_ward_anaphylaxis_iv_initial.json": "6d181f88c8b6c3820927c58e98faa8464d8ac89501e0f67f4c5b108b511c7113",
-    "peds_anaphylaxis_sim/scenarios/peds_ward_anaphylaxis_iv_variantA.json": "add6094c640b995958c213ae179b3424797e6434cd0fa676a91230c5643b402d",
+    "peds_anaphylaxis_sim/scenarios/peds_ward_allergy_academy_initial.json": "3921241d529b28d8d4309455eab6a017e4899faa89779e12d336f1712e8d976b",
+    "peds_anaphylaxis_sim/scenarios/peds_ward_allergy_academy_variant.json": "c379745d516e060df4b630674a223d0b01cb9d082032db2ddb172d34149e1e5f",
+    "peds_anaphylaxis_sim/scenarios/peds_ward_anaphylaxis_iv_initial.json": "38c4d0e94e4b6e4fe4e5e2013ccd2f779b3f268673e5ea3d22cde567fb5432b1",
+    "peds_anaphylaxis_sim/scenarios/peds_ward_anaphylaxis_iv_variantA.json": "07fc8f012712160fe03d27dae81270429725249c0f61c3b4a307d6687f735d8b",
 }
 
 

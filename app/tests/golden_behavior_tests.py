@@ -26,8 +26,8 @@ from peds_anaphylaxis_sim.scenario_loader import (  # noqa: E402
 )
 
 
-GOLDEN_PATH = ROOT / "tests" / "golden" / "v1_3_8_behavior_baseline.json"
-GOLDEN_CONTRACT_VERSION = 1
+GOLDEN_PATH = ROOT / "tests" / "golden" / "v1_3_9_audit_behavior_baseline.json"
+GOLDEN_CONTRACT_VERSION = 2
 
 CLINICAL_STANDARD_STEPS = [
     ("action", "stop_infusion"),
@@ -54,6 +54,8 @@ ACADEMY_STANDARD_STEPS = [
     ("action", "connect_monitor"),
     ("action", "check_bp"),
     ("action", "prepare_rescue_equipment"),
+    ("action", "academy_medication_check"),
+    ("action", "academy_assisted_medication"),
     ("action", "academy_reassess"),
     ("action", "academy_family_communication"),
     ("action", "academy_sbar_handoff"),

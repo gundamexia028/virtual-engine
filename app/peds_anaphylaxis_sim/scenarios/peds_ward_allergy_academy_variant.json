@@ -170,7 +170,13 @@
       "academy_family_communication": false,
       "academy_sbar_done": false,
       "academy_completed": false,
-      "epinephrine_rescue_prepared": false
+      "epinephrine_rescue_prepared": false,
+      "bp_ordered_at_sec": 0,
+      "order_violations": {},
+      "last_effective_epi_time_sec": null,
+      "academy_medication_checked": false,
+      "drug_check_cooperation": false,
+      "academy_assisted_medication_done": false
     }
   },
   "thresholds": {
@@ -214,8 +220,7 @@
         "set_flags": {
           "stopped_infusion": true,
           "infusion_running": false,
-          "rescue_access_preserved": true,
-          "iv_access": true
+          "rescue_access_preserved": true
         }
       }
     },
@@ -288,17 +293,16 @@
       ],
       "effects": {
         "set_flags": {
-          "bp_ordered": true,
-          "bp_checked": true
+          "bp_ordered": true
         }
       }
     },
     {
       "id": "prepare_rescue_equipment",
-      "label": "准备抢救车、肾上腺素注射液、注射器、晶体液和氧疗物品，并配合老师/医生核对体重、药名、剂量和给药途径",
+      "label": "准备抢救车、肾上腺素、注射器、晶体液和氧疗物品（准备不等于核对或给药）",
       "category": "critical_rescue_cooperation",
       "score": {
-        "points": 15,
+        "points": 5,
         "time_window_seconds": 240
       },
       "risk_tags_when_missing": [
@@ -308,8 +312,55 @@
       "effects": {
         "set_flags": {
           "rescue_equipment_prepared": true,
-          "epinephrine_rescue_prepared": true,
+          "epinephrine_rescue_prepared": true
+        }
+      }
+    },
+    {
+      "id": "academy_medication_check",
+      "label": "在老师/医生指导下完成患儿、体重、药名、剂量、浓度及肌内途径核对（尚未给药）",
+      "category": "critical_rescue_cooperation",
+      "score": {
+        "points": 5,
+        "time_window_seconds": 240
+      },
+      "effects": {
+        "set_flags": {
+          "academy_medication_checked": true,
           "drug_check_cooperation": true
+        }
+      }
+    },
+    {
+      "id": "academy_assisted_medication",
+      "label": "核对无误后，在老师/医生指导下配合完成肾上腺素肌内给药，并确认实际给药完成",
+      "category": "critical_rescue_cooperation",
+      "score": {
+        "points": 5,
+        "time_window_seconds": 270
+      },
+      "effects": {
+        "set_flags": {
+          "epi_im_given": true,
+          "epi_effect_ticks": 6,
+          "academy_assisted_medication_done": true
+        },
+        "counter_inc": {
+          "epi_im_doses": 1
+        },
+        "delta_vitals": {
+          "SBP": 12,
+          "DBP": 6,
+          "HR": -8,
+          "SpO2": 4,
+          "RR": -4
+        },
+        "delta_symptoms": {
+          "wheeze": -2,
+          "stridor": -2,
+          "rash": -1,
+          "angioedema": -1,
+          "consciousness": -1
         }
       }
     },
@@ -524,11 +575,34 @@
           "SBP": -4
         }
       }
+    },
+    {
+      "id": "academy_restore_iv",
+      "label": "通路丢失后，在老师/医生指导下配合重新建立静脉通路",
+      "category": "conditional_remediation",
+      "score": {
+        "points": 0
+      },
+      "effects": {
+        "set_flags": {
+          "iv_access": true,
+          "iv_access_reestablished": true
+        }
+      }
     }
   ],
   "dynamics": {
     "tick_seconds": 30,
     "rules": [
+      {
+        "name": "bp_result_available",
+        "when": "flags.bp_ordered and (not flags.bp_checked) and t >= flags.bp_ordered_at_sec + 30",
+        "effects": {
+          "set_flags": {
+            "bp_checked": true
+          }
+        }
+      },
       {
         "name": "ongoing_exposure_worsens_academy",
         "when": "flags.infusion_running and t >= 30",
@@ -546,17 +620,18 @@
         }
       },
       {
-        "name": "basic_support_stabilizes_academy",
-        "when": "flags.stopped_infusion and flags.help_called and flags.oxygen_on and t >= 60 and (t % 60 == 0)",
+        "name": "academy_mediator_cascade_without_medication",
+        "when": "flags.stopped_infusion and not flags.epi_im_given and t >= 60 and t % 60 == 0",
         "effects": {
-          "delta_symptoms": {
-            "wheeze": -1
-          },
           "delta_vitals": {
-            "SpO2": 2,
-            "HR": -3,
-            "SBP": 2,
-            "RR": -1
+            "SpO2": -1,
+            "HR": 3,
+            "SBP": -2,
+            "DBP": -1,
+            "RR": 1
+          },
+          "delta_symptoms": {
+            "wheeze": 1
           }
         }
       },
@@ -575,14 +650,52 @@
             "RR": 3
           }
         }
+      },
+      {
+        "name": "epi_primary_effect_ticks",
+        "when": "flags.academy_assisted_medication_done and flags.epi_effect_ticks > 0 and not flags.dead and not flags.cardiac_arrest",
+        "effects": {
+          "delta_vitals": {
+            "SBP": 7,
+            "DBP": 4,
+            "SpO2": 4,
+            "HR": -8,
+            "RR": -4
+          },
+          "delta_symptoms": {
+            "wheeze": -1,
+            "stridor": -1,
+            "rash": -1,
+            "angioedema": -1,
+            "consciousness": -1
+          },
+          "counter_inc": {
+            "epi_effect_ticks": -1
+          }
+        }
+      },
+      {
+        "name": "academy_recovery_after_actual_medication",
+        "when": "flags.academy_assisted_medication_done and flags.stopped_infusion and flags.oxygen_on and flags.help_called and flags.epi_effect_ticks == 0 and not flags.dead and not flags.cardiac_arrest and t % 60 == 0 and (vitals.SpO2 < 98 or vitals.SBP < age_sbp_threshold or symptoms.wheeze > 0)",
+        "effects": {
+          "delta_vitals": {
+            "SpO2": 2,
+            "HR": -3,
+            "SBP": 2,
+            "RR": -1
+          },
+          "delta_symptoms": {
+            "wheeze": -1
+          }
+        }
       }
     ]
   },
   "end_conditions": {
-    "success_when": "flags.allergy_identified and flags.stopped_infusion and flags.help_called and flags.oxygen_on and flags.monitor_on and flags.bp_checked and flags.rescue_equipment_prepared and flags.academy_reassessment_done and flags.academy_family_communication and flags.academy_sbar_done",
+    "success_when": "flags.allergy_identified and flags.stopped_infusion and flags.help_called and flags.oxygen_on and flags.monitor_on and flags.bp_checked and flags.rescue_equipment_prepared and flags.academy_reassessment_done and flags.academy_family_communication and flags.academy_sbar_done and flags.academy_medication_checked and flags.academy_assisted_medication_done and flags.iv_access and not flags.infusion_running and not flags.dead and not flags.cardiac_arrest and grade <= 2 and vitals.SpO2 >= 95 and vitals.SBP >= age_sbp_threshold",
     "failure_when": "flags.dead or flags.cardiac_arrest or vitals.SpO2 <= 70 or vitals.SBP <= 45",
     "max_time_seconds": 900,
-    "completion_gate_note": "V1.3.6: academy post-test may only proceed to SUS after all core academy actions are completed; early severe-but-not-arrest deterioration is recorded as risk, not automatic stage completion."
+    "completion_gate_note": "Audit1.3.9: 12 valid core actions including separate preparation/check/actual supervised medication, plus physiological recovery. Early attempts do not satisfy the completion gate."
   },
   "reporting": {
     "observe_recommendation": {
@@ -619,9 +732,19 @@
         "done_when": "flags.oxygen_on and flags.monitor_on and flags.bp_checked"
       },
       {
-        "text": "步骤5：准备抢救车、肾上腺素、注射器、晶体液和氧疗物品，并配合核对。",
-        "reason": "肾上腺素是一线急救药物，但护生应在老师/医生指导下配合核对，不独立给药。",
+        "text": "准备抢救物品；仅准备不表示已核对或给药。",
+        "reason": "准备、核对、实际给药是三项不同的完成状态。",
         "done_when": "flags.rescue_equipment_prepared"
+      },
+      {
+        "text": "在老师/医生指导下完成用药核对。",
+        "reason": "核对患儿身份、体重、药物、剂量、浓度和途径，仍不等于实际给药。",
+        "done_when": "flags.academy_medication_checked"
+      },
+      {
+        "text": "核对无误后，在老师/医生指导下配合完成实际给药。",
+        "reason": "只有实际给药完成才触发药物治疗效应。护生不独立给药。",
+        "done_when": "flags.academy_assisted_medication_done"
       },
       {
         "text": "步骤6：初步处理后复评生命体征和症状变化。",
@@ -691,9 +814,11 @@
       "name": "肾上腺素认知与抢救配合",
       "max_points": 15,
       "actions": [
-        "prepare_rescue_equipment"
+        "prepare_rescue_equipment",
+        "academy_medication_check",
+        "academy_assisted_medication"
       ],
-      "boundary": "知道肾上腺素是一线急救药物，准备抢救物品并配合老师/医生核对，不独立给药。"
+      "boundary": "准备、核对、在老师/医生指导下实际配合给药各5分；不得混同，不授权护生独立给药。"
     },
     "academy_module5_reassessment": {
       "name": "病情复评",
@@ -721,16 +846,19 @@
     "connect_monitor": 5,
     "check_bp": 6,
     "prepare_rescue_equipment": 7,
-    "academy_reassess": 8,
-    "academy_family_communication": 9,
-    "academy_sbar_handoff": 10,
+    "academy_reassess": 10,
+    "academy_family_communication": 11,
+    "academy_sbar_handoff": 12,
     "continue_infusion": 91,
     "remove_iv": 92,
     "ask_family_first": 93,
     "send_family_for_help": 94,
     "prepare_steroid_antihistamine_only": 95,
     "student_independent_epinephrine": 96,
-    "watch_only": 97
+    "watch_only": 97,
+    "academy_medication_check": 8,
+    "academy_assisted_medication": 9,
+    "academy_restore_iv": 90
   },
   "risk_tag_dictionary": {
     "延迟识别": "未能及时识别严重过敏反应危险信号",
@@ -752,5 +880,6 @@
     "病情复评不足": "未系统复评生命体征和症状变化",
     "沟通安抚不足": "未进行符合情境的基础家属安抚",
     "汇报信息不完整": "SBAR汇报缺少关键信息"
-  }
+  },
+  "audit_contract_revision": "1.3.9-audit.1"
 }

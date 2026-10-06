@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-护理动态分支虚拟仿真训练平台｜V1.3.8 academy teacher trial UI display fixed
+护理动态分支虚拟仿真训练平台｜V1.3.9-audit.1 offline repair candidate
 
 本版重点：
 - 时间/分级/得分/复评移至左侧病例下方的运行信息区；
@@ -37,6 +37,8 @@ import io
 import json
 import os
 import random
+from copy import deepcopy
+from ui_commands import execute_command, revision as command_revision, pending_input
 import re
 import secrets as token_secrets
 import time
@@ -1044,100 +1046,8 @@ def _review_live_vital_pattern_value(bucket: int, metric: str) -> int:
 
 
 def live_display_vitals(sim: Simulator, bucket: Optional[int] = None) -> Dict[str, str]:
-    """Return review-mode monitor values with UI-only physiologic variation.
-
-    Clinical and academy modes both receive small bedside-monitor display changes.
-    The function never mutates ``sim.state``: disease evolution, elapsed scenario
-    time, scoring, reports and exported research/review data remain unchanged.
-    """
-    try:
-        system_mode = current_flow_strategy(sim).system_mode
-    except Exception:
-        system_mode = current_system_mode()
-    if system_mode not in {"clinical", "academy"}:
-        return visible_vitals(sim)
-
-    f = sim.state.flags
-    if f.get("dead", False) or (
-        f.get("cardiac_arrest", False) and not f.get("resuscitation_rosc", False)
-    ):
-        return visible_vitals(sim)
-
-    if bucket is None:
-        bucket = int(time.monotonic() // CLINICAL_REVIEW_LIVE_VITALS_REFRESH_SECONDS)
-
-    v = sim.state.vitals
-    out = {"体温": f"{v.get('Temp', 0):.1f} ℃"}
-
-    if f.get("monitor_on", False):
-        spo2 = max(
-            40,
-            min(
-                100,
-                round(float(v.get("SpO2", 0)) + _review_live_vital_pattern_value(bucket, "SpO2")),
-            ),
-        )
-        hr = max(
-            40,
-            min(
-                220,
-                round(float(v.get("HR", 0)) + _review_live_vital_pattern_value(bucket, "HR")),
-            ),
-        )
-        if f.get("resuscitation_rosc", False):
-            out.update(
-                {
-                    "SpO₂": f"{spo2:.0f} %（波形恢复）",
-                    "HR": f"{hr:.0f} /min（可触及脉搏）",
-                    "RR": "人工通气支持",
-                }
-            )
-        else:
-            rr = max(
-                5,
-                min(
-                    80,
-                    round(float(v.get("RR", 0)) + _review_live_vital_pattern_value(bucket, "RR")),
-                ),
-            )
-            out.update(
-                {
-                    "SpO₂": f"{spo2:.0f} %",
-                    "HR": f"{hr:.0f} /min",
-                    "RR": f"{rr:.0f} /min",
-                }
-            )
-    else:
-        if f.get("resuscitation_rosc", False):
-            out.update(
-                {"SpO₂": "未连接监护", "HR": "未连接监护", "RR": "人工通气支持"}
-            )
-        else:
-            out.update(
-                {"SpO₂": "未连接监护", "HR": "未连接监护", "RR": "未连接监护"}
-            )
-
-    if f.get("bp_checked", False):
-        # BP refreshes more slowly than HR/RR/SpO2 while remaining display-only.
-        bp_bucket = int(bucket) // 3
-        sbp = max(
-            30,
-            min(
-                160,
-                round(float(v.get("SBP", 0)) + _review_live_vital_pattern_value(bp_bucket, "SBP")),
-            ),
-        )
-        dbp = max(
-            20,
-            min(
-                110,
-                round(float(v.get("DBP", 0)) + _review_live_vital_pattern_value(bp_bucket, "DBP")),
-            ),
-        )
-        out["BP"] = f"{sbp:.0f}/{dbp:.0f} mmHg"
-    else:
-        out["BP"] = "未测量"
-    return out
+    """Display the same measured state used by grading and reports; no fake timer jitter."""
+    return visible_vitals(sim)
 
 
 def symptoms_text(sim: Simulator) -> str:
@@ -3102,7 +3012,7 @@ def _return_to_registration_after_save(report: Dict[str, Any], why: str) -> None
 
 def _enter_completed_clinical_result(report: Dict[str, Any], why: str) -> None:
     """Keep a saved clinical result visible and refresh-restorable."""
-    st.session_state.last_report = report
+    st.session_state.last_report = deepcopy(report)
     st.session_state.ended = True
     st.session_state.end_reason = why
     st.session_state.pending_prior_experience_survey = False
@@ -3166,13 +3076,9 @@ def return_home_after_clinical_result() -> None:
 
 
 ACADEMY_POST_TEST_REQUIRED_TIMELINE_KEYS = [
-    "allergy_identification",
-    "stop_infusion",
-    "call_help",
-    "prepare_rescue_equipment",
-    "academy_reassess",
-    "academy_family_communication",
-    "academy_sbar_handoff",
+    "allergy_identification", "stop_infusion", "call_help", "high_flow_oxygen", "connect_monitor", "check_bp",
+    "prepare_rescue_equipment", "academy_medication_check", "academy_assisted_medication", "academy_reassess",
+    "academy_family_communication", "academy_sbar_handoff",
 ]
 
 
@@ -3201,8 +3107,10 @@ def _academy_post_test_fully_completed(report: Optional[Dict[str, Any]], why: st
         return False
     if not isinstance(report, dict):
         return False
-    timeline = report.get("key_timeline", {}) or {}
-    return all(timeline.get(key) is not None for key in ACADEMY_POST_TEST_REQUIRED_TIMELINE_KEYS)
+    timeline = report.get("action_valid_time", {}) or {}
+    flags = report.get("clinical_pathway_flags", {}) or {}
+    return bool(flags.get("academy_medication_checked") and flags.get("academy_assisted_medication_done")
+                and all(timeline.get(key) is not None for key in ACADEMY_POST_TEST_REQUIRED_TIMELINE_KEYS))
 
 
 def _needs_academy_post_evaluation(report: Optional[Dict[str, Any]] = None, why: str = "") -> bool:
@@ -3378,7 +3286,7 @@ def submit_academy_post_evaluation(
             f"问卷尚未提交成功（{type(exc).__name__}）。请稍后安全重试。"
         )
         st.session_state.pending_academy_post_evaluation = True
-        st.session_state.pending_post_evaluation_report = report
+        st.session_state.pending_post_evaluation_report = deepcopy(report)
         st.session_state.pending_post_evaluation_reason = why
         persist_active_training_draft()
         return False, st.session_state.questionnaire_submit_error
@@ -3391,7 +3299,7 @@ def submit_academy_post_evaluation(
     st.session_state.teaching_experience_mean = evaluation["teaching_experience"]["mean"]
     st.session_state.questionnaire_submit_status = "completed"
     st.session_state.questionnaire_submit_error = ""
-    st.session_state.last_report = report
+    st.session_state.last_report = deepcopy(report)
     st.session_state.pending_academy_post_evaluation = False
     st.session_state.pending_post_evaluation_report = None
     st.session_state.pending_post_evaluation_reason = ""
@@ -3478,7 +3386,7 @@ def _save_and_end_report(report: Dict[str, Any], why: str) -> None:
         save_result_record(report)
         st.session_state.last_report_paths = (json_path, md_path)
     st.session_state.result_saved = True
-    st.session_state.last_report = report
+    st.session_state.last_report = deepcopy(report)
     if current_system_mode() == "academy":
         phase = str(st.session_state.get("assessment_phase", "") or "")
         page = completion_page_for_phase(phase)
@@ -3495,7 +3403,7 @@ def _save_and_end_report(report: Dict[str, Any], why: str) -> None:
         st.session_state.pending_academy_post_evaluation = False
         if phase == "课后考核" and _needs_academy_post_evaluation(report, why):
             st.session_state.pending_academy_post_evaluation = True
-            st.session_state.pending_post_evaluation_report = report
+            st.session_state.pending_post_evaluation_report = deepcopy(report)
             st.session_state.pending_post_evaluation_reason = why
             ensure_questionnaire_submission_id()
             if st.session_state.get("questionnaire_submit_status") != "failed":
@@ -3552,8 +3460,8 @@ def finalize_if_done() -> None:
             st.session_state.baseline_performance_completed = True
             st.session_state.pending_prior_experience_survey = True
             st.session_state.pending_completion_reason = why
-            st.session_state.pending_report = report
-            st.session_state.last_report = report
+            st.session_state.pending_report = deepcopy(report)
+            st.session_state.last_report = deepcopy(report)
             return
         if st.session_state.get("assessment_phase") == "基线评估":
             st.session_state.baseline_stage_completed = True
@@ -4782,7 +4690,7 @@ def make_ui_snapshot(sim: Simulator) -> Dict[str, Any]:
     return {
         "time": sim.state.t,
         "clinical": symptoms_text(sim),
-        "score": f"{sim.score}/{sim.max_score}",
+        "score": f"{sim.display_score()}/{sim.max_score}",
         "reassess": int(sim.state.flags.get("reassess_count", 0)),
         "symptoms": symptoms_text(sim),
         "vitals": visible_vitals(sim),
@@ -4851,7 +4759,7 @@ def render_top_status(sim: Simulator, changes: Dict[str, Any]) -> None:
     action_count = sum(1 for e in sim.log if e.kind == "action" and e.message != "penalty")
     strategy = current_flow_strategy(sim)
     if strategy.score_presentation == "live":
-        score_text = f"{sim.score}/{sim.max_score}"
+        score_text = f"{sim.display_score()}/{sim.max_score}"
         items = [
             ("时间", format_elapsed_time(sim.state.t), False),
             ("得分", score_text, bool(changes.get("score"))),
@@ -4976,7 +4884,6 @@ def _render_patient_status_body(
         st.markdown(panel_html, unsafe_allow_html=True)
 
 
-@st.fragment(run_every=CLINICAL_REVIEW_LIVE_VITALS_REFRESH_SECONDS)
 def _render_clinical_patient_status_fragment(
     sim: Simulator,
     scenario: Dict[str, Any],
@@ -5010,7 +4917,6 @@ def _render_clinical_patient_status_fragment(
     )
 
 
-@st.fragment(run_every=CLINICAL_REVIEW_LIVE_VITALS_REFRESH_SECONDS)
 def _render_academy_patient_status_fragment(
     sim: Simulator,
     scenario: Dict[str, Any],
@@ -5045,19 +4951,13 @@ def _render_academy_patient_status_fragment(
 
 
 def render_patient_status(sim: Simulator, scenario: Dict[str, Any], changes: Dict[str, Any]) -> None:
-    system_mode = current_flow_strategy(sim).system_mode
-    if system_mode == "clinical":
-        _render_clinical_patient_status_fragment(sim, scenario, changes)
-    elif system_mode == "academy":
-        _render_academy_patient_status_fragment(sim, scenario, changes)
-    else:
-        _render_patient_status_body(
-            sim,
-            scenario,
-            changes,
-            live_monitor=False,
-            direct_html=False,
-        )
+    # Full-script rendering owns this panel; no timer holds a stale Simulator reference.
+    _render_patient_status_body(sim, scenario, changes, live_monitor=False, direct_html=True)
+    if current_flow_strategy(sim).system_mode == "academy":
+        f = sim.state.flags
+        labels = [("准备", "rescue_equipment_prepared"), ("核对", "academy_medication_checked"),
+                  ("实际配合给药", "academy_assisted_medication_done")]
+        st.caption("用药完成状态：" + "；".join(label + ("已完成" if f.get(flag) else "未完成") for label, flag in labels))
 
 
 def render_intro() -> None:
@@ -5403,7 +5303,7 @@ def render_system_mode_selection_page() -> bool:
         if st.button("进入学院模式", type="primary", use_container_width=True):
             reset_for_mode_selection("academy")
             st.rerun()
-    st.info("说明：临床模式不改变原系统逻辑；学院模式保留通用情景库框架，当前仅开放严重过敏反应/过敏性休克抢救情景。两类数据在报告中通过 system_mode 字段区分，学院数据另通过 academy_scenario_id 区分情景。")
+    st.info("说明：两种模式保留各自教学规则，本版本统一校准状态、评分与整页刷新；学院模式保留通用情景库框架，当前仅开放严重过敏反应/过敏性休克抢救情景。两类数据在报告中通过 system_mode 字段区分，学院数据另通过 academy_scenario_id 区分情景。")
     return False
 
 
@@ -5855,6 +5755,18 @@ def render_admin_page() -> None:
         """)
 
 
+def _dispatch_ui_command(session_id: str, expected_revision, command: str, action_id: str = "", value_key: str = "") -> None:
+    value = st.session_state.get(value_key) if value_key else None
+    result = execute_command(st.session_state, session_id, expected_revision, command, action_id, value)
+    sim = st.session_state.get("active_simulator")
+    feedback = bool(sim and current_flow_strategy(sim).show_immediate_feedback)
+    # Syntax/transport errors are not exam coaching: show them in both modes.
+    input_error = result.get("status") in {"invalid_input", "no_iv_access", "input_pending", "stale_event"}
+    st.session_state.last_dose_feedback = str(result.get("message", "")) if feedback or input_error else ""
+    st.session_state.last_dose_feedback_level = str(result.get("status", "")) if feedback or input_error else ""
+    st.session_state.last_feedback_is_input_error = input_error
+
+
 def render_epinephrine_dose_panel(sim: Simulator) -> bool:
     """Render dose-confirmation panel for IM epinephrine or repeat IM epinephrine."""
     pending_id = st.session_state.get("pending_dose_action_id", "")
@@ -5881,7 +5793,7 @@ def render_epinephrine_dose_panel(sim: Simulator) -> bool:
     if strategy.show_immediate_feedback:
         st.caption(f"训练提示：本例体重 {weight:g} kg；剂量为 0.01 mg/kg，即 {target_mg:g} mg；儿童单次最大 {max_single_mg:g} mg。")
 
-    dose_key = f"epi_dose_mg_{pending_id}_{st.session_state.session_id}_{sim.state.t}"
+    dose_key = f"epi_dose_mg_{pending_id}_{st.session_state.session_id}"
     dose_mg = st.number_input(
         "本次肌注总剂量（mg）",
         min_value=0.0,
@@ -5892,28 +5804,14 @@ def render_epinephrine_dose_panel(sim: Simulator) -> bool:
         key=dose_key,
     )
     c_ok, c_cancel = st.columns([1, 1], gap="medium")
-    if c_ok.button("确认剂量并执行", type="primary", use_container_width=True):
-        if claim_ui_event("confirm_dose", str(pending_id), sim.state.t):
-            result = sim.apply_epinephrine_dose(float(dose_mg), action_id=pending_id)
-            st.session_state.last_dose_feedback = (
-                str(result.get("message", ""))
-                if strategy.show_immediate_feedback
-                else ""
-            )
-            st.session_state.last_dose_feedback_level = (
-                str(result.get("status", ""))
-                if strategy.show_immediate_feedback
-                else ""
-            )
-            st.session_state.pending_dose_action_id = ""
-            st.session_state.pending_dose_action_label = ""
-            sim.tick()
-            finalize_if_done()
-        st.rerun()
-    if c_cancel.button("取消输入", use_container_width=True):
-        st.session_state.pending_dose_action_id = ""
-        st.session_state.pending_dose_action_label = ""
-        st.rerun()
+    c_ok.button("确认剂量并执行", type="primary", use_container_width=True,
+        key=f"confirm_epinephrine_{st.session_state.session_id}",
+        on_click=_dispatch_ui_command,
+        args=(st.session_state.session_id, command_revision(sim), "epinephrine", str(pending_id), dose_key),
+        disabled=sim.is_done()[0])
+    c_cancel.button("取消输入", use_container_width=True,
+        key=f"cancel_epinephrine_{st.session_state.session_id}", on_click=_dispatch_ui_command,
+        args=(st.session_state.session_id, command_revision(sim), "cancel"))
     return True
 
 
@@ -5942,7 +5840,7 @@ def render_fluid_bolus_panel(sim: Simulator) -> bool:
     if strategy.show_immediate_feedback:
         st.caption(f"训练提示：本例体重 {weight:g} kg；合理范围 {min_ml:g}–{max_ml:g} ml（10–20 ml/kg，单次最大500 ml）。")
 
-    volume_key = f"fluid_volume_ml_{st.session_state.session_id}_{sim.state.t}"
+    volume_key = f"fluid_volume_ml_{st.session_state.session_id}"
     volume_ml = st.number_input(
         "本次快速补液容量（ml）",
         min_value=0.0,
@@ -5953,30 +5851,15 @@ def render_fluid_bolus_panel(sim: Simulator) -> bool:
         key=volume_key,
     )
     c_ok, c_cancel = st.columns([1, 1], gap="medium")
-    if c_ok.button("确认容量并执行", type="primary", use_container_width=True):
-        if claim_ui_event("confirm_volume", str(pending_id), sim.state.t):
-            result = sim.apply_fluid_bolus_volume(float(volume_ml))
-            st.session_state.last_dose_feedback = (
-                str(result.get("message", ""))
-                if strategy.show_immediate_feedback
-                else ""
-            )
-            st.session_state.last_dose_feedback_level = (
-                str(result.get("status", ""))
-                if strategy.show_immediate_feedback
-                else ""
-            )
-            st.session_state.pending_volume_action_id = ""
-            st.session_state.pending_volume_action_label = ""
-            sim.tick()
-            finalize_if_done()
-        st.rerun()
-    if c_cancel.button("取消输入", use_container_width=True):
-        st.session_state.pending_volume_action_id = ""
-        st.session_state.pending_volume_action_label = ""
-        st.rerun()
+    c_ok.button("确认容量并执行", type="primary", use_container_width=True,
+        key=f"confirm_fluid_{st.session_state.session_id}",
+        on_click=_dispatch_ui_command,
+        args=(st.session_state.session_id, command_revision(sim), "fluid", str(pending_id), volume_key),
+        disabled=sim.is_done()[0])
+    c_cancel.button("取消输入", use_container_width=True,
+        key=f"cancel_fluid_{st.session_state.session_id}", on_click=_dispatch_ui_command,
+        args=(st.session_state.session_id, command_revision(sim), "cancel"))
     return True
-
 
 
 def render_steroid_dose_panel(sim: Simulator) -> bool:
@@ -6004,7 +5887,7 @@ def render_steroid_dose_panel(sim: Simulator) -> bool:
     if strategy.show_immediate_feedback:
         st.caption(f"训练提示：本例体重 {weight:g} kg；甲泼尼龙参考范围 {min_mg:g}–{max_mg:g} mg（1–2 mg/kg，单次最大40 mg）。必须在有效快速扩容后使用。")
 
-    steroid_key = f"steroid_dose_mg_{st.session_state.session_id}_{sim.state.t}"
+    steroid_key = f"steroid_dose_mg_{st.session_state.session_id}"
     dose_mg = st.number_input(
         "本次甲泼尼龙剂量（mg）",
         min_value=0.0,
@@ -6015,30 +5898,15 @@ def render_steroid_dose_panel(sim: Simulator) -> bool:
         key=steroid_key,
     )
     c_ok, c_cancel = st.columns([1, 1], gap="medium")
-    if c_ok.button("确认剂量并执行", type="primary", use_container_width=True):
-        if claim_ui_event("confirm_steroid", str(pending_id), sim.state.t):
-            result = sim.apply_steroid_dose(float(dose_mg))
-            st.session_state.last_dose_feedback = (
-                str(result.get("message", ""))
-                if strategy.show_immediate_feedback
-                else ""
-            )
-            st.session_state.last_dose_feedback_level = (
-                str(result.get("status", ""))
-                if strategy.show_immediate_feedback
-                else ""
-            )
-            st.session_state.pending_steroid_action_id = ""
-            st.session_state.pending_steroid_action_label = ""
-            sim.tick()
-            finalize_if_done()
-        st.rerun()
-    if c_cancel.button("取消输入", use_container_width=True):
-        st.session_state.pending_steroid_action_id = ""
-        st.session_state.pending_steroid_action_label = ""
-        st.rerun()
+    c_ok.button("确认剂量并执行", type="primary", use_container_width=True,
+        key=f"confirm_steroid_{st.session_state.session_id}",
+        on_click=_dispatch_ui_command,
+        args=(st.session_state.session_id, command_revision(sim), "steroid", str(pending_id), steroid_key),
+        disabled=sim.is_done()[0])
+    c_cancel.button("取消输入", use_container_width=True,
+        key=f"cancel_steroid_{st.session_state.session_id}", on_click=_dispatch_ui_command,
+        args=(st.session_state.session_id, command_revision(sim), "cancel"))
     return True
-
 
 
 def render_prior_experience_survey() -> None:
@@ -6137,6 +6005,8 @@ def visible_actions_for_current_state(sim: Simulator) -> List[Dict[str, Any]]:
         if aid == "repeat_epinephrine" and not flags.get("repeat_epi_indicated", False):
             continue
         if is_academy:
+            if aid == "academy_restore_iv" and flags.get("iv_access", True):
+                continue
             # Once the learner has correctly paused the suspicious infusion, the
             # delay/continue-observation distractor is no longer a meaningful next
             # action and should not remain clickable.
@@ -6491,14 +6361,14 @@ def render_simulation() -> None:
             )
 
             if (
-                strategy.show_immediate_feedback
+                (strategy.show_immediate_feedback or st.session_state.get("last_feedback_is_input_error", False))
                 and st.session_state.get("last_dose_feedback")
             ):
                 level = st.session_state.get("last_dose_feedback_level", "")
                 msg = st.session_state.get("last_dose_feedback", "")
                 if level == "valid":
                     st.success(msg)
-                elif level in ["overdose", "invalid", "over"]:
+                elif level in ["overdose", "invalid", "over", "invalid_input"]:
                     st.error(msg)
                 elif level in ["underdose", "dose_high", "under", "not_indicated", "timing_error", "used_before_first_line", "role_boundary", "passive_response"]:
                     st.warning(msg)
@@ -6520,82 +6390,24 @@ def render_simulation() -> None:
                     aid = action.get("id")
                     button_text = full_label
                     with col:
-                        if st.button(
+                        st.button(
                             button_text,
-                            key=f"action_{aid}_{sim.state.t}_{idx}_{local_index}",
+                            key=f"action_{st.session_state.session_id}_{aid}",
+                            help=str(action.get("label", "")),
                             use_container_width=True,
-                            disabled=(dose_pending or volume_pending or steroid_pending),
-                        ):
-                            st.session_state.last_dose_feedback = ""
-                            st.session_state.last_dose_feedback_level = ""
-                            if (
-                                sim.state.flags.get("cardiac_arrest", False)
-                                and not sim.state.flags.get("cpr_done", False)
-                                and aid != "cpr"
-                            ):
-                                # V1.2.6d: once cardiac arrest is present, the immediate
-                                # next operation must be CPR. Do not open dose/volume panels
-                                # for a non-CPR choice; record terminal death directly.
-                                if claim_ui_event("action", str(aid), sim.state.t):
-                                    if strategy.system_mode == "academy":
-                                        apply_academy_action(sim, str(aid))
-                                    else:
-                                        sim.apply_action(aid)
-                                    finalize_if_done()
-                                st.rerun()
-                            elif aid in ("im_epinephrine", "repeat_epinephrine"):
-                                st.session_state.pending_dose_action_id = aid
-                                st.session_state.pending_dose_action_label = full_label
-                                st.rerun()
-                            elif aid == "fluid_bolus":
-                                st.session_state.pending_volume_action_id = aid
-                                st.session_state.pending_volume_action_label = full_label
-                                st.rerun()
-                            elif aid == "steroid":
-                                st.session_state.pending_steroid_action_id = aid
-                                st.session_state.pending_steroid_action_label = full_label
-                                st.rerun()
-                            else:
-                                if claim_ui_event("action", str(aid), sim.state.t):
-                                    if strategy.system_mode == "academy":
-                                        action_result = apply_academy_action(
-                                            sim,
-                                            str(aid),
-                                        )
-                                    else:
-                                        sim.apply_action(aid)
-                                        action_result = {
-                                            "executed": True,
-                                            "feedback": "",
-                                        }
-                                    if action_result.get("executed", False):
-                                        if strategy.show_immediate_feedback:
-                                            st.session_state.last_dose_feedback = str(
-                                                action_result.get("feedback", "") or ""
-                                            )
-                                            st.session_state.last_dose_feedback_level = (
-                                                "role_boundary"
-                                                if aid
-                                                == "student_independent_epinephrine"
-                                                else (
-                                                    "passive_response"
-                                                    if aid == "watch_only"
-                                                    else ""
-                                                )
-                                            )
-                                        sim.tick()
-                                        finalize_if_done()
-                                st.rerun()
+                            disabled=(dose_pending or volume_pending or steroid_pending or sim.is_done()[0]),
+                            on_click=_dispatch_ui_command,
+                            args=(st.session_state.session_id, command_revision(sim), "action", str(aid)),
+                        )
 
             render_action_history(sim)
 
             st.divider()
             c1, c2, c3 = st.columns([1.0, 1.35, 1.95], gap="medium")
-            if c1.button(format_time_progress(sim.tick_seconds), use_container_width=True):
-                if claim_ui_event("advance_time", "", sim.state.t):
-                    sim.tick()
-                    finalize_if_done()
-                st.rerun()
+            c1.button(format_time_progress(sim.tick_seconds), use_container_width=True,
+                key=f"advance_time_{st.session_state.session_id}", on_click=_dispatch_ui_command,
+                args=(st.session_state.session_id, command_revision(sim), "advance_time"),
+                disabled=(dose_pending or volume_pending or steroid_pending or sim.is_done()[0]))
 
             if not strategy.allow_manual_completion:
                 c2.button("本阶段自动结束", type="primary", use_container_width=True, disabled=True)
@@ -6665,8 +6477,8 @@ def render_simulation() -> None:
                                 st.session_state.pending_completion_reason = (
                                     "participant_confirmed_rescue_complete"
                                 )
-                                st.session_state.pending_report = report
-                                st.session_state.last_report = report
+                                st.session_state.pending_report = deepcopy(report)
+                                st.session_state.last_report = deepcopy(report)
                             else:
                                 if st.session_state.get("assessment_phase") == "基线评估":
                                     st.session_state.baseline_stage_completed = True
@@ -6752,7 +6564,7 @@ def render_report() -> None:
     report = st.session_state.last_report
     if not report:
         report = enrich_report(st.session_state.active_simulator.build_report(), end_reason=st.session_state.end_reason)
-        st.session_state.last_report = report
+        st.session_state.last_report = deepcopy(report)
 
     result_context = build_result_page_context(report, st.session_state.end_reason)
     if (

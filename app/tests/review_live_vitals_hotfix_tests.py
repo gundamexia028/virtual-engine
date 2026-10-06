@@ -49,25 +49,25 @@ class ReviewLiveVitalsHotfixTests(unittest.TestCase):
         except Exception:
             pass
 
-    def test_clinical_live_display_changes_without_mutating_simulator(self):
+    def test_clinical_live_display_is_stable_without_mutating_simulator(self):
         sim = DummySim()
         before_vitals = deepcopy(sim.state.vitals)
         before_t = sim.state.t
         with patch.object(app, "current_flow_strategy", return_value=SimpleNamespace(system_mode="clinical")):
             first = app.live_display_vitals(sim, bucket=10)
             second = app.live_display_vitals(sim, bucket=11)
-        self.assertNotEqual(first, second)
+        self.assertEqual(first, second)
         self.assertEqual(sim.state.vitals, before_vitals)
         self.assertEqual(sim.state.t, before_t)
 
-    def test_academy_live_display_changes_without_mutating_simulator(self):
+    def test_academy_live_display_is_stable_without_mutating_simulator(self):
         sim = DummySim()
         before_vitals = deepcopy(sim.state.vitals)
         before_t = sim.state.t
         with patch.object(app, "current_flow_strategy", return_value=SimpleNamespace(system_mode="academy")):
             first = app.live_display_vitals(sim, bucket=10)
             second = app.live_display_vitals(sim, bucket=11)
-        self.assertNotEqual(first, second)
+        self.assertEqual(first, second)
         self.assertEqual(sim.state.vitals, before_vitals)
         self.assertEqual(sim.state.t, before_t)
 

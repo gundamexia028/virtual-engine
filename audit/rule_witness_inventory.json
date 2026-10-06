@@ -1,0 +1,357 @@
+{
+  "registered_rules": 50,
+  "observed_rules": 42,
+  "not_observed": [
+    {
+      "role": "initial",
+      "rule_id": "steroid_effect_record_ticks",
+      "condition": "flags.steroid_valid and flags.steroid_effect_ticks > 0",
+      "observed_in_final_bounded_or_directed_run": false
+    },
+    {
+      "role": "initial",
+      "rule_id": "asphyxia_death_after_prolonged_unresolved_delay",
+      "condition": "(not flags.resuscitation_rosc) and (flags.epinephrine_delay_after_core_steps and (not flags.epi_im_given) and t >= 480 and (vitals.SpO2 < 78 or vitals.SBP < age_sbp_threshold or symptoms.consciousness >= 3))",
+      "observed_in_final_bounded_or_directed_run": false
+    },
+    {
+      "role": "initial",
+      "rule_id": "stabilization_after_control",
+      "condition": "flags.epi_im_given and flags.oxygen_on and flags.stopped_infusion and t >= 180 and (vitals.SpO2 < 98 or vitals.SBP < 95 or symptoms.rash >= 1 or symptoms.wheeze >= 1 or symptoms.stridor >= 1) and not flags.epi_overdose_event and not flags.tachycardia_heart_failure and not flags.airway_obstruction_triggered and not flags.cardiac_arrest and not flags.dead",
+      "observed_in_final_bounded_or_directed_run": false
+    },
+    {
+      "role": "variant",
+      "rule_id": "steroid_effect_record_ticks",
+      "condition": "flags.steroid_valid and flags.steroid_effect_ticks > 0",
+      "observed_in_final_bounded_or_directed_run": false
+    },
+    {
+      "role": "variant",
+      "rule_id": "asphyxia_death_after_prolonged_unresolved_delay",
+      "condition": "(not flags.resuscitation_rosc) and (flags.epinephrine_delay_after_core_steps and (not flags.epi_im_given) and t >= 480 and (vitals.SpO2 < 78 or vitals.SBP < age_sbp_threshold or symptoms.consciousness >= 3))",
+      "observed_in_final_bounded_or_directed_run": false
+    },
+    {
+      "role": "variant",
+      "rule_id": "stabilization_after_control",
+      "condition": "flags.epi_im_given and flags.oxygen_on and flags.stopped_infusion and t >= 180 and (vitals.SpO2 < 98 or vitals.SBP < 95 or symptoms.rash >= 1 or symptoms.wheeze >= 1 or symptoms.stridor >= 1) and not flags.epi_overdose_event and not flags.tachycardia_heart_failure and not flags.airway_obstruction_triggered and not flags.cardiac_arrest and not flags.dead",
+      "observed_in_final_bounded_or_directed_run": false
+    },
+    {
+      "role": "academy_initial",
+      "rule_id": "academy_recovery_after_actual_medication",
+      "condition": "flags.academy_assisted_medication_done and flags.stopped_infusion and flags.oxygen_on and flags.help_called and flags.epi_effect_ticks == 0 and not flags.dead and not flags.cardiac_arrest and t % 60 == 0 and (vitals.SpO2 < 98 or vitals.SBP < age_sbp_threshold or symptoms.wheeze > 0)",
+      "observed_in_final_bounded_or_directed_run": false
+    },
+    {
+      "role": "academy_variant",
+      "rule_id": "academy_recovery_after_actual_medication",
+      "condition": "flags.academy_assisted_medication_done and flags.stopped_infusion and flags.oxygen_on and flags.help_called and flags.epi_effect_ticks == 0 and not flags.dead and not flags.cardiac_arrest and t % 60 == 0 and (vitals.SpO2 < 98 or vitals.SBP < age_sbp_threshold or symptoms.wheeze > 0)",
+      "observed_in_final_bounded_or_directed_run": false
+    }
+  ],
+  "rules": [
+    {
+      "role": "initial",
+      "rule_id": "bp_result_available",
+      "condition": "flags.bp_ordered and (not flags.bp_checked) and t >= flags.bp_ordered_at_sec + 30",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "initial",
+      "rule_id": "ongoing_exposure_worsens_fast",
+      "condition": "flags.infusion_running and t >= 30",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "initial",
+      "rule_id": "slow_mediator_cascade_before_epi_node",
+      "condition": "flags.stopped_infusion and (not flags.epi_im_given) and (not flags.epinephrine_delay_after_core_steps) and t >= 30 and (t % 60 == 0)",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "initial",
+      "rule_id": "slow_airway_worsening_without_oxygen_before_epi_node",
+      "condition": "(not flags.epi_im_given) and (not flags.epinephrine_delay_after_core_steps) and (not flags.oxygen_on) and t >= 60 and (t % 60 == 0)",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "initial",
+      "rule_id": "severe_deterioration_after_epi_node_delay",
+      "condition": "(not flags.resuscitation_rosc) and ((not flags.epi_im_given) and flags.epinephrine_delay_after_core_steps and t >= 30)",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "initial",
+      "rule_id": "airway_compromise_after_epi_delay",
+      "condition": "(not flags.resuscitation_rosc) and ((not flags.epi_im_given) and flags.epinephrine_delay_after_core_steps and (vitals.SpO2 < 92 or symptoms.wheeze >= 2 or symptoms.consciousness >= 1))",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "initial",
+      "rule_id": "airway_obstruction_triggered",
+      "condition": "(not flags.resuscitation_rosc) and (flags.airway_compromise and (symptoms.stridor >= 2 or vitals.SpO2 < 88 or symptoms.consciousness >= 2))",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "initial",
+      "rule_id": "bvm_required_if_ventilation_failing",
+      "condition": "(not flags.resuscitation_rosc) and (flags.airway_obstruction_triggered and (vitals.SpO2 < 88 or symptoms.consciousness >= 2 or vitals.RR < 10))",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "initial",
+      "rule_id": "oxygen_support_improves_spo2",
+      "condition": "flags.oxygen_on and (not flags.airway_obstruction_triggered) and vitals.SpO2 < 98",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "initial",
+      "rule_id": "oxygen_limited_by_airway_obstruction",
+      "condition": "(not flags.resuscitation_rosc) and (flags.oxygen_on and flags.airway_obstruction_triggered and vitals.SpO2 < 94)",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "initial",
+      "rule_id": "epi_primary_effect_ticks",
+      "condition": "flags.epi_effect_ticks > 0",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "initial",
+      "rule_id": "fluid_support_ticks",
+      "condition": "flags.fluid_effect_ticks > 0",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "initial",
+      "rule_id": "bvm_effect_ticks",
+      "condition": "flags.bvm_effect_ticks > 0",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "initial",
+      "rule_id": "nebulized_epi_effect_ticks",
+      "condition": "flags.neb_epi_effect_ticks > 0",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "initial",
+      "rule_id": "bronchodilator_effect_ticks",
+      "condition": "flags.bronchodilator_effect_ticks > 0",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "initial",
+      "rule_id": "steroid_effect_record_ticks",
+      "condition": "flags.steroid_valid and flags.steroid_effect_ticks > 0",
+      "observed_in_final_bounded_or_directed_run": false
+    },
+    {
+      "role": "initial",
+      "rule_id": "asphyxia_death_after_prolonged_unresolved_delay",
+      "condition": "(not flags.resuscitation_rosc) and (flags.epinephrine_delay_after_core_steps and (not flags.epi_im_given) and t >= 480 and (vitals.SpO2 < 78 or vitals.SBP < age_sbp_threshold or symptoms.consciousness >= 3))",
+      "observed_in_final_bounded_or_directed_run": false
+    },
+    {
+      "role": "initial",
+      "rule_id": "stabilization_after_control",
+      "condition": "flags.epi_im_given and flags.oxygen_on and flags.stopped_infusion and t >= 180 and (vitals.SpO2 < 98 or vitals.SBP < 95 or symptoms.rash >= 1 or symptoms.wheeze >= 1 or symptoms.stridor >= 1) and not flags.epi_overdose_event and not flags.tachycardia_heart_failure and not flags.airway_obstruction_triggered and not flags.cardiac_arrest and not flags.dead",
+      "observed_in_final_bounded_or_directed_run": false
+    },
+    {
+      "role": "initial",
+      "rule_id": "fluid_requires_iv",
+      "condition": "(not flags.iv_access) and flags.fluid_bolus_given and t >= 30",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "variant",
+      "rule_id": "bp_result_available",
+      "condition": "flags.bp_ordered and (not flags.bp_checked) and t >= flags.bp_ordered_at_sec + 30",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "variant",
+      "rule_id": "ongoing_exposure_worsens_fast",
+      "condition": "flags.infusion_running and t >= 30",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "variant",
+      "rule_id": "slow_mediator_cascade_before_epi_node",
+      "condition": "flags.stopped_infusion and (not flags.epi_im_given) and (not flags.epinephrine_delay_after_core_steps) and t >= 30 and (t % 60 == 0)",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "variant",
+      "rule_id": "slow_airway_worsening_without_oxygen_before_epi_node",
+      "condition": "(not flags.epi_im_given) and (not flags.epinephrine_delay_after_core_steps) and (not flags.oxygen_on) and t >= 60 and (t % 60 == 0)",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "variant",
+      "rule_id": "severe_deterioration_after_epi_node_delay",
+      "condition": "(not flags.resuscitation_rosc) and ((not flags.epi_im_given) and flags.epinephrine_delay_after_core_steps and t >= 30)",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "variant",
+      "rule_id": "airway_compromise_after_epi_delay",
+      "condition": "(not flags.resuscitation_rosc) and ((not flags.epi_im_given) and flags.epinephrine_delay_after_core_steps and (vitals.SpO2 < 92 or symptoms.wheeze >= 2 or symptoms.consciousness >= 1))",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "variant",
+      "rule_id": "airway_obstruction_triggered",
+      "condition": "(not flags.resuscitation_rosc) and (flags.airway_compromise and (symptoms.stridor >= 2 or vitals.SpO2 < 88 or symptoms.consciousness >= 2))",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "variant",
+      "rule_id": "bvm_required_if_ventilation_failing",
+      "condition": "(not flags.resuscitation_rosc) and (flags.airway_obstruction_triggered and (vitals.SpO2 < 88 or symptoms.consciousness >= 2 or vitals.RR < 10))",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "variant",
+      "rule_id": "oxygen_support_improves_spo2",
+      "condition": "flags.oxygen_on and (not flags.airway_obstruction_triggered) and vitals.SpO2 < 98",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "variant",
+      "rule_id": "oxygen_limited_by_airway_obstruction",
+      "condition": "(not flags.resuscitation_rosc) and (flags.oxygen_on and flags.airway_obstruction_triggered and vitals.SpO2 < 94)",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "variant",
+      "rule_id": "epi_primary_effect_ticks",
+      "condition": "flags.epi_effect_ticks > 0",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "variant",
+      "rule_id": "fluid_support_ticks",
+      "condition": "flags.fluid_effect_ticks > 0",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "variant",
+      "rule_id": "bvm_effect_ticks",
+      "condition": "flags.bvm_effect_ticks > 0",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "variant",
+      "rule_id": "nebulized_epi_effect_ticks",
+      "condition": "flags.neb_epi_effect_ticks > 0",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "variant",
+      "rule_id": "bronchodilator_effect_ticks",
+      "condition": "flags.bronchodilator_effect_ticks > 0",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "variant",
+      "rule_id": "steroid_effect_record_ticks",
+      "condition": "flags.steroid_valid and flags.steroid_effect_ticks > 0",
+      "observed_in_final_bounded_or_directed_run": false
+    },
+    {
+      "role": "variant",
+      "rule_id": "asphyxia_death_after_prolonged_unresolved_delay",
+      "condition": "(not flags.resuscitation_rosc) and (flags.epinephrine_delay_after_core_steps and (not flags.epi_im_given) and t >= 480 and (vitals.SpO2 < 78 or vitals.SBP < age_sbp_threshold or symptoms.consciousness >= 3))",
+      "observed_in_final_bounded_or_directed_run": false
+    },
+    {
+      "role": "variant",
+      "rule_id": "stabilization_after_control",
+      "condition": "flags.epi_im_given and flags.oxygen_on and flags.stopped_infusion and t >= 180 and (vitals.SpO2 < 98 or vitals.SBP < 95 or symptoms.rash >= 1 or symptoms.wheeze >= 1 or symptoms.stridor >= 1) and not flags.epi_overdose_event and not flags.tachycardia_heart_failure and not flags.airway_obstruction_triggered and not flags.cardiac_arrest and not flags.dead",
+      "observed_in_final_bounded_or_directed_run": false
+    },
+    {
+      "role": "variant",
+      "rule_id": "fluid_requires_iv",
+      "condition": "(not flags.iv_access) and flags.fluid_bolus_given and t >= 30",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "academy_initial",
+      "rule_id": "bp_result_available",
+      "condition": "flags.bp_ordered and (not flags.bp_checked) and t >= flags.bp_ordered_at_sec + 30",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "academy_initial",
+      "rule_id": "ongoing_exposure_worsens_academy",
+      "condition": "flags.infusion_running and t >= 30",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "academy_initial",
+      "rule_id": "academy_mediator_cascade_without_medication",
+      "condition": "flags.stopped_infusion and not flags.epi_im_given and t >= 60 and t % 60 == 0",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "academy_initial",
+      "rule_id": "unaddressed_risk_progresses_academy",
+      "condition": "(not flags.stopped_infusion or not flags.help_called) and t >= 180 and (t % 90 == 0)",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "academy_initial",
+      "rule_id": "epi_primary_effect_ticks",
+      "condition": "flags.academy_assisted_medication_done and flags.epi_effect_ticks > 0 and not flags.dead and not flags.cardiac_arrest",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "academy_initial",
+      "rule_id": "academy_recovery_after_actual_medication",
+      "condition": "flags.academy_assisted_medication_done and flags.stopped_infusion and flags.oxygen_on and flags.help_called and flags.epi_effect_ticks == 0 and not flags.dead and not flags.cardiac_arrest and t % 60 == 0 and (vitals.SpO2 < 98 or vitals.SBP < age_sbp_threshold or symptoms.wheeze > 0)",
+      "observed_in_final_bounded_or_directed_run": false
+    },
+    {
+      "role": "academy_variant",
+      "rule_id": "bp_result_available",
+      "condition": "flags.bp_ordered and (not flags.bp_checked) and t >= flags.bp_ordered_at_sec + 30",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "academy_variant",
+      "rule_id": "ongoing_exposure_worsens_academy",
+      "condition": "flags.infusion_running and t >= 30",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "academy_variant",
+      "rule_id": "academy_mediator_cascade_without_medication",
+      "condition": "flags.stopped_infusion and not flags.epi_im_given and t >= 60 and t % 60 == 0",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "academy_variant",
+      "rule_id": "unaddressed_risk_progresses_academy",
+      "condition": "(not flags.stopped_infusion or not flags.help_called) and t >= 180 and (t % 90 == 0)",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "academy_variant",
+      "rule_id": "epi_primary_effect_ticks",
+      "condition": "flags.academy_assisted_medication_done and flags.epi_effect_ticks > 0 and not flags.dead and not flags.cardiac_arrest",
+      "observed_in_final_bounded_or_directed_run": true
+    },
+    {
+      "role": "academy_variant",
+      "rule_id": "academy_recovery_after_actual_medication",
+      "condition": "flags.academy_assisted_medication_done and flags.stopped_infusion and flags.oxygen_on and flags.help_called and flags.epi_effect_ticks == 0 and not flags.dead and not flags.cardiac_arrest and t % 60 == 0 and (vitals.SpO2 < 98 or vitals.SBP < age_sbp_threshold or symptoms.wheeze > 0)",
+      "observed_in_final_bounded_or_directed_run": false
+    }
+  ],
+  "limits": "A fired-rule witness is not branch-complete expression coverage. Synthetic witnesses are labeled in directed JSONL. Unobserved does not by itself prove unreachable."
+}

@@ -21,6 +21,7 @@ Pediatric Ward Anaphylaxis Simulator (system V1.3.8; academy branching lineage V
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 import json
 import os
 import datetime as _dt
@@ -29,10 +30,12 @@ from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 
 try:
+    from .integrity import ENGINE_REVISION, assert_finite_tree, isolated_result, numeric_command, compile_condition, safe_eval
     from .scenario_loader import load_scenario_file
     from .flow_strategies import flow_strategy_for_scenario
     from .time_format import format_elapsed_time, format_timeline_value
 except ImportError:  # pragma: no cover - direct engine.py compatibility
+    from integrity import ENGINE_REVISION, assert_finite_tree, isolated_result, numeric_command, compile_condition, safe_eval
     from scenario_loader import load_scenario_file  # type: ignore
     from flow_strategies import flow_strategy_for_scenario  # type: ignore
     from time_format import format_elapsed_time, format_timeline_value  # type: ignore
@@ -66,18 +69,21 @@ class LogEntry:
     data: Dict[str, Any] = field(default_factory=dict)
 
 
-def safe_eval(expr: str, ctx: dict) -> bool:
-    """
-    Minimal safe evaluator for scenario expressions (done_when / rule conditions).
-    Only allows reading from ctx and basic Python operators.
-    """
-    if not expr:
-        return False
-    allowed_builtins = {"min": min, "max": max, "int": int, "float": float, "bool": bool}
-    return bool(eval(expr, {"__builtins__": allowed_builtins}, ctx))
-
 class Simulator:
     def __init__(self, scenario: Dict[str, Any], mode: str = "coach", seed: int = -1):
+        assert_finite_tree(scenario)
+        if mode not in ("coach", "exam"):
+            raise ValueError("Unsupported simulator mode")
+        scenario = deepcopy(scenario)
+        for rule in scenario.get("dynamics", {}).get("rules", []):
+            compile_condition(rule["when"])
+        for prompt in scenario.get("training", {}).get("guided_prompts", []):
+            compile_condition(prompt["done_when"])
+        for key in ("success_when", "failure_when"):
+            compile_condition(scenario["end_conditions"][key])
+        ids = [action["id"] for action in scenario["actions"]]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Duplicate scenario action IDs")
         self.scenario = scenario
         self.mode = mode
         self.flow_strategy = flow_strategy_for_scenario(scenario, mode)
@@ -181,7 +187,7 @@ class Simulator:
             weight_kg=float(scenario["patient"]["weight_kg"]),
             vitals={k: float(v) for k, v in base["vitals"].items()},
             symptoms={k: int(v) for k, v in base["symptoms"].items()},
-            flags=dict(base["flags"]),
+            flags=deepcopy(base["flags"]),
             baseline_vitals={k: float(v) for k, v in base["vitals"].items()},
             grade=1,
         )
@@ -193,6 +199,9 @@ class Simulator:
         self.action_valid_time: Dict[str, int] = {}
 
         self.tick_seconds = int(self.scenario["dynamics"].get("tick_seconds", 30))
+        if self.tick_seconds <= 0 or self.state.weight_kg <= 0 or self.state.age_years < 0:
+            raise ValueError("Invalid patient or tick configuration")
+        self.state.grade = self.compute_grade()
         self.min_time_for_success = int(self.scenario.get("training", {}).get("min_time_seconds_for_success", 0))
         self.min_reassess_recommended = int(self.scenario.get("training", {}).get("min_reassess_count_recommended", 2))
 
@@ -204,10 +213,12 @@ class Simulator:
             "min_time_for_success": self.min_time_for_success
         })
 
+    @isolated_result
     def to_snapshot(self) -> Dict[str, Any]:
         """Return a JSON-safe snapshot of the in-progress simulation."""
         return {
             "schema_version": 1,
+            "engine_revision": ENGINE_REVISION,
             "scenario": self.scenario,
             "mode": self.mode,
             "seed": self.seed,
@@ -244,26 +255,36 @@ class Simulator:
         """Restore a simulation from a validated JSON snapshot."""
         if not isinstance(snapshot, dict) or snapshot.get("schema_version") != 1:
             raise ValueError("Unsupported simulation snapshot.")
+        assert_finite_tree(snapshot)
+        if snapshot.get("engine_revision") != ENGINE_REVISION:
+            raise ValueError("This in-progress draft predates the repaired engine. Start a new run; archived reports remain readable.")
+        snapshot = deepcopy(snapshot)
+        def exact_integer(value):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError("Snapshot integer must not be coerced or truncated.")
+            return value
         scenario = snapshot.get("scenario")
         mode = snapshot.get("mode")
         if not isinstance(scenario, dict) or mode not in ("coach", "exam"):
             raise ValueError("Invalid simulation snapshot metadata.")
         try:
-            seed = int(snapshot.get("seed"))
+            seed = exact_integer(snapshot.get("seed"))
             sim = cls(scenario, mode=mode, seed=seed)
             state = snapshot.get("state")
             if not isinstance(state, dict):
                 raise ValueError("Missing simulation state.")
-            t = int(state.get("t"))
-            age_years = int(state.get("age_years"))
+            t = exact_integer(state.get("t"))
+            age_years = exact_integer(state.get("age_years"))
             weight_kg = float(state.get("weight_kg"))
-            grade = int(state.get("grade"))
+            grade = exact_integer(state.get("grade"))
             vitals = state.get("vitals")
             symptoms = state.get("symptoms")
             flags = state.get("flags")
             baseline_vitals = state.get("baseline_vitals")
             if (
                 t < 0
+                or t > int(sim.scenario["end_conditions"]["max_time_seconds"])
+                or t % sim.tick_seconds != 0
                 or age_years < 0
                 or weight_kg <= 0
                 or grade not in (1, 2, 3, 4)
@@ -273,6 +294,10 @@ class Simulator:
                 or not isinstance(baseline_vitals, dict)
             ):
                 raise ValueError("Invalid simulation state values.")
+            if (set(vitals) != set(sim.state.vitals) or set(baseline_vitals) != set(sim.state.baseline_vitals)
+                    or set(symptoms) != set(sim.state.symptoms)
+                    or age_years != sim.state.age_years or weight_kg != sim.state.weight_kg):
+                raise ValueError("Snapshot patient or measurement schema changed.")
             sim.state = SimState(
                 t=t,
                 age_years=age_years,
@@ -293,16 +318,18 @@ class Simulator:
                     raise ValueError("Invalid simulation log entry.")
                 sim.log.append(
                     LogEntry(
-                        t=int(item.get("t")),
+                        t=exact_integer(item.get("t")),
                         kind=str(item.get("kind", "")),
                         message=str(item.get("message", "")),
                         data=item.get("data", {}),
                     )
                 )
 
-            score = int(snapshot.get("score"))
-            max_score = int(snapshot.get("max_score"))
-            penalties = int(snapshot.get("penalties"))
+            if any(e.t < 0 or e.t > t for e in sim.log) or any(a.t > b.t for a, b in zip(sim.log, sim.log[1:])):
+                raise ValueError("Snapshot log contains future or non-monotonic time.")
+            score = exact_integer(snapshot.get("score"))
+            max_score = exact_integer(snapshot.get("max_score"))
+            penalties = exact_integer(snapshot.get("penalties"))
             if max_score != sim.max_score or score < 0 or score > max_score or penalties < 0:
                 raise ValueError("Invalid simulation score.")
             sim.score = score
@@ -312,14 +339,18 @@ class Simulator:
                 values = snapshot.get(name, {})
                 if not isinstance(values, dict):
                     raise ValueError("Invalid simulation timeline.")
-                restored = {str(k): int(v) for k, v in values.items()}
-                if any(value < 0 for value in restored.values()):
+                restored = {str(k): exact_integer(v) for k, v in values.items()}
+                valid_ids = {action["id"] for action in sim.actions}
+                if not set(restored).issubset(valid_ids) or any(value < 0 or value > t for value in restored.values()):
                     raise ValueError("Invalid simulation timeline value.")
                 return restored
 
             sim.action_first_time = restore_times("action_first_time")
             sim.action_valid_time = restore_times("action_valid_time")
-            guided_index = int(snapshot.get("guided_index", 0))
+            if any(aid not in sim.action_first_time or at < sim.action_first_time[aid]
+                   for aid, at in sim.action_valid_time.items()):
+                raise ValueError("Valid completion cannot precede its attempt.")
+            guided_index = exact_integer(snapshot.get("guided_index", 0))
             if guided_index < 0 or guided_index > len(sim.guided_prompts):
                 raise ValueError("Invalid guided prompt position.")
             sim.guided_index = guided_index
@@ -338,7 +369,7 @@ class Simulator:
         return s
 
     def _log(self, kind: str, message: str, data: Optional[Dict[str, Any]] = None) -> None:
-        self.log.append(LogEntry(t=self.state.t, kind=kind, message=message, data=data or {}))
+        self.log.append(LogEntry(t=self.state.t, kind=kind, message=message, data=deepcopy(data or {})))
 
     def age_sbp_threshold(self) -> float:
         age = self.state.age_years
@@ -387,7 +418,7 @@ class Simulator:
             except Exception:
                 pass
         for k, v in effects.get("set_flags", {}).items():
-            self.state.flags[k] = v
+            self.state.flags[k] = deepcopy(v)
         for k, inc in effects.get("counter_inc", {}).items():
             self.state.flags[k] = int(self.state.flags.get(k, 0)) + int(inc)
         for k, dv in effects.get("delta_vitals", {}).items():
@@ -395,6 +426,9 @@ class Simulator:
         for k, ds in effects.get("delta_symptoms", {}).items():
             self.state.symptoms[k] = int(self.state.symptoms.get(k, 0)) + int(ds)
 
+        if self.state.flags.get("dead", False):
+            self.state.grade = 4
+            return
         self.state.vitals["SpO2"] = clamp(self.state.vitals.get("SpO2", 100), 40, 100)
         self.state.vitals["HR"] = clamp(self.state.vitals.get("HR", 120), 40, 220)
         self.state.vitals["RR"] = clamp(self.state.vitals.get("RR", 30), 5, 80)
@@ -466,11 +500,11 @@ class Simulator:
             v["DBP"] = min(float(v.get("DBP", 62)), b["dbp_cap"])
 
     def tick(self) -> None:
-        if self.state.flags.get("dead", False):
+        if self.is_done()[0]:
             self.state.grade = self.compute_grade()
             return
 
-        self.state.t += self.tick_seconds
+        self.state.t = min(self.state.t + self.tick_seconds, int(self.scenario["end_conditions"]["max_time_seconds"]))
         self._refresh_process_flags()
 
         # If cardiac arrest was already present and another time step passes
@@ -493,12 +527,19 @@ class Simulator:
         }
 
         for rule in self.scenario["dynamics"]["rules"]:
+            if self.state.flags.get("dead", False):
+                break
+            ctx.update(vitals=SimpleNamespace(**self.state.vitals),
+                       symptoms=SimpleNamespace(**self.state.symptoms),
+                       flags=SimpleNamespace(**self.state.flags))
             when = rule.get("when", "")
             if not when:
                 continue
             try:
                 if safe_eval(when, ctx):
                     self.apply_effects(rule.get("effects", {}))
+                    if rule.get("name") == "bp_result_available":
+                        self._mark_valid_completion("check_bp")
                     self._log("tick", "rule_applied", {"rule": rule.get("name", "")})
             except Exception as e:
                 self._log("system", "rule_eval_error", {"rule": rule.get("name", ""), "error": str(e)})
@@ -701,8 +742,10 @@ class Simulator:
                 ("call_help", "呼叫老师/上级护士/医生", bool(f.get("help_called", False))),
                 ("high_flow_oxygen", "基础氧疗/气道支持", bool(f.get("oxygen_on", False))),
                 ("connect_monitor", "连接监护", bool(f.get("monitor_on", False))),
-                ("check_bp", "测量血压/循环评估", bool(f.get("bp_checked", False) or "check_bp" in self.action_first_time)),
-                ("prepare_rescue_equipment", "准备抢救用物并配合核对", bool(f.get("rescue_equipment_prepared", False))),
+                ("check_bp", "测量血压/循环评估", bool(f.get("bp_checked", False))),
+                ("prepare_rescue_equipment", "准备抢救用物", bool(f.get("rescue_equipment_prepared", False))),
+                ("academy_medication_check", "老师/医生指导下核对", bool(f.get("academy_medication_checked", False))),
+                ("academy_assisted_medication", "老师/医生指导下实际配合给药", bool(f.get("academy_assisted_medication_done", False))),
                 ("academy_reassess", "基础复评", bool(f.get("academy_reassessment_done", False))),
                 ("academy_family_communication", "家属安抚/告知", bool(f.get("academy_family_communication", False))),
                 ("academy_sbar_handoff", "简化SBAR汇报", bool(f.get("academy_sbar_done", False))),
@@ -715,7 +758,7 @@ class Simulator:
             ("high_flow_oxygen", "开放气道给氧", bool(f.get("oxygen_on", False))),
             ("shock_position", "体位管理", bool(f.get("positioned", False))),
             ("connect_monitor", "连接监护", bool(f.get("monitor_on", False))),
-            ("check_bp", "测量血压", bool(f.get("bp_checked", False) or "check_bp" in self.action_first_time)),
+            ("check_bp", "测量血压", bool(f.get("bp_checked", False))),
             ("im_epinephrine", "有效肌注肾上腺素", bool(f.get("epi_im_given", False))),
             ("fluid_bolus", "有效快速补液", bool(f.get("fluid_bolus_valid", False))),
             ("reassess_first", "第一次有效复评", bool(f.get("first_reassessment_done", False))),
@@ -728,13 +771,16 @@ class Simulator:
         return [f"{aid}:{label}" for aid, label, ok in checks if not ok]
 
     def mark_manual_rescue_completion(self) -> None:
+        done, why = self.is_done()
+        if self.state.flags.get("manual_rescue_completion") or (done and why not in ("success", "standard_assessment_completed")):
+            return
         f = self.state.flags
         f["manual_rescue_completion"] = True
         f["manual_rescue_completion_time_sec"] = int(self.state.t)
         f["unfinished_required_steps"] = self._unfinished_required_steps()
-        total_required = 15
+        total_required = 12 if self._is_academy_basic_case() else 15
         f["completion_rate_at_manual_finish"] = round((total_required - len(f["unfinished_required_steps"])) / total_required * 100, 1)
-        f["score_at_manual_finish"] = int(self.score)
+        f["score_at_manual_finish"] = self.display_score()
         self._log("system", "manual_rescue_completion", {
             "unfinished_required_steps": list(f["unfinished_required_steps"]),
             "completion_rate_at_manual_finish": f["completion_rate_at_manual_finish"],
@@ -781,13 +827,18 @@ class Simulator:
         f = self.state.flags
         t = int(self.state.t)
 
+        if canonical in f.get("order_violations", {}):
+            return points // 2, "delayed", "曾提前尝试该收尾/治疗步骤；补做可有效完成，但不追溯为首次正确顺序满分。"
+
+        # Academy deadlines are the existing scenario windows, not a new clinical deadline.
         # V1.3.1 学院模式：基础教学病例不继承临床版肾上腺素/补液/复评边界。
         target_group = self.scenario.get("scenario", {}).get("target_group", "")
         issue_profile = self.scenario.get("reporting", {}).get("issue_profile", "")
         if target_group == "nursing_student" or issue_profile == "academy_basic":
-            if canonical in self.action_module_map or canonical in self.standard_flow_order:
-                return points, "full", "学院基础能力动作已完成，按本模块分值计分。"
-            return points, "full", "非模块映射动作，按原始分值处理。"
+            window = int((self._find_action(canonical) or {}).get("score", {}).get("time_window_seconds", 99999))
+            if t > window:
+                return points // 2, "delayed", "有效完成，但超过病例预设教学评分时间窗，按延迟半分。"
+            return points, "full", "学院动作在有效前提和教学时间窗内完成。"
 
         module1 = {"stop_infusion", "call_help"}
         module2 = {"abc_assess", "high_flow_oxygen", "shock_position", "connect_monitor", "check_bp"}
@@ -877,7 +928,8 @@ class Simulator:
             "status": status,
             "reason": reason,
         })
-        if int(gained) > 0:
+        if (canonical != "im_epinephrine"
+                and (canonical != "check_bp" or self.state.flags.get("bp_checked", False))):
             self._mark_valid_completion(canonical)
         if status == "delayed":
             self.state.flags.setdefault("delayed_actions", [])
@@ -930,7 +982,7 @@ class Simulator:
             bool(f.get("oxygen_on", False)),
             bool(f.get("positioned", False)),
             bool(f.get("monitor_on", False)),
-            bool(f.get("bp_checked", False) or "check_bp" in self.action_first_time),
+            bool(f.get("bp_checked", False)),
         ]
         return int(sum(checks))
 
@@ -1217,6 +1269,11 @@ class Simulator:
         if self.state.flags.get(flag, False):
             return 0
         gained, status, reason = self._apply_delay_rule("im_epinephrine", int(points))
+        if component_key == "dose_correct" and any(self.state.flags.get(k) for k in
+                ("epi_underdose_event", "epi_dose_high_event", "epi_overdose_event")):
+            gained = min(gained, int(points) // 2)
+            status = "delayed"
+            reason = "此前已有有效数值但不正确的给药尝试；纠正可完成治疗，剂量分项不追溯为首次正确满分。"
         self.score += int(gained)
         if self.score > self.max_score:
             self.score = self.max_score
@@ -1277,10 +1334,79 @@ class Simulator:
         self.state.flags["academy_safety_penalty_points"] = int(self.state.flags.get("academy_safety_penalty_points", 0) or 0) + penalty
         self.penalties += penalty
 
+    def _record_order_violation(self, action_id: str, reason: str) -> None:
+        self.state.flags.setdefault("order_violations", {}).setdefault(
+            action_id, {"first_t": int(self.state.t), "reason": reason})
+
+    def _academy_action(self, action_id: str, action: Dict[str, Any]) -> bool:
+        """Native academy state machine. Return True when handled here.
+
+        Scoring ordering is a teaching rubric, not a claim that early clinical
+        assessment or urgent communication should be withheld in patient care.
+        """
+        if not self._is_academy_basic_case():
+            return False
+        handled = {"prepare_rescue_equipment", "academy_medication_check", "academy_assisted_medication",
+                   "academy_reassess", "academy_family_communication", "academy_sbar_handoff", "academy_restore_iv"}
+        if action_id not in handled:
+            return False
+        self._first_attempt(action_id)
+        f = self.state.flags
+        valid = True
+        reason = ""
+        if action_id == "academy_medication_check":
+            valid = bool(f.get("rescue_equipment_prepared") and f.get("help_called"))
+            reason = "须先准备抢救用物，并呼叫老师/医生参与核对。"
+        elif action_id == "academy_assisted_medication":
+            valid = bool(f.get("rescue_equipment_prepared") and f.get("academy_medication_checked")
+                         and f.get("help_called") and f.get("stopped_infusion") and not f.get("infusion_running"))
+            reason = "须先停用可疑输入、呼救并完成用药核对，才能确认老师/医生指导下的实际给药。"
+        elif action_id == "academy_reassess":
+            given = self.action_valid_time.get("academy_assisted_medication")
+            valid = bool(given is not None and self.state.t >= given + self.tick_seconds
+                         and f.get("monitor_on") and f.get("bp_checked"))
+            reason = "本次可记录观察，但治疗后有效复评须实际给药后经过至少一个模拟时间步，并完成监测及血压测量。"
+        elif action_id == "academy_family_communication":
+            valid = bool(f.get("academy_reassessment_done"))
+            reason = "可随时安抚家属；本项治疗后总结告知的评分须基于有效复评。"
+        elif action_id == "academy_sbar_handoff":
+            valid = bool(f.get("academy_reassessment_done") and f.get("academy_family_communication")
+                         and f.get("academy_assisted_medication_done"))
+            reason = "可随时紧急汇报；本项阶段结束交接须包含实际给药及有效复评，不作为提前结束的捷径。"
+        elif action_id == "academy_restore_iv":
+            valid = bool(f.get("help_called") and not f.get("iv_access", True))
+            reason = "仅在通路丢失后、老师/医生指导下配合重建。"
+        if not valid:
+            self._record_order_violation(action_id, reason)
+            self._log("action", action_id, {"label": action.get("label", ""), "status": "prerequisite_not_met",
+                "gained": 0, "result": reason})
+            return True
+        gained = self._award_points_once(action_id, int(action.get("score", {}).get("points", 0)), action_id)
+        self.apply_effects(action.get("effects", {}))
+        self._mark_valid_completion(action_id)
+        if action_id == "academy_assisted_medication":
+            f["last_effective_epi_time_sec"] = int(self.state.t)
+            f["epi_valid_dose_mg"] = round(min(0.01 * self.state.weight_kg, 0.3), 3)
+        self._refresh_process_flags()
+        self.state.grade = self.compute_grade()
+        self._log("action", action_id, {"label": action.get("label", ""), "status": "valid", "gained": gained,
+            "result": "已按本项前提有效完成；准备、核对、实际给药分别留痕。"})
+        return True
+
     def apply_action(self, action_id: str) -> None:
+        if self.is_done()[0]:
+            return
         action = self._find_action(action_id)
         if not action:
             self._log("action", "unknown_action", {"action_id": action_id})
+            return
+
+        repeatable = {"stop_infusion", "check_bp", "advanced_support", "cpr", "reassess_first",
+                      "reassess_second", "family_explain", "sbar_handoff", "establish_iv"}
+        one_shot_done = action_id in self.action_valid_time and action_id not in repeatable
+        if one_shot_done:
+            self._log("action", action_id, {"status": "already_completed", "gained": 0,
+                "result": "该动作已有效完成，本次不叠加治疗或分数。"})
             return
 
         # V1.2.6d: after cardiac arrest, the immediate next action must be CPR.
@@ -1305,10 +1431,17 @@ class Simulator:
         # displayed score and cannot coexist with a perfect 100/100 report.
         self._record_academy_unsafe_action(action_id, action)
 
+        if self._academy_action(action_id, action):
+            return
+        if action_id == "check_bp":
+            self.state.flags["bp_ordered_at_sec"] = int(self.state.t)
+            self.state.flags["bp_checked"] = False
+
         # Custom actions whose score depends on prerequisites, not just first click.
         if action_id == "reassess_first":
             self._first_attempt(action_id)
-            if self.state.flags.get("epi_im_given", False) and self.state.flags.get("fluid_bolus_valid", False):
+            if (self.state.flags.get("epi_im_given", False) and self.state.flags.get("fluid_bolus_valid", False)
+                    and self.state.t >= self.action_valid_time.get("fluid_bolus", self.state.t) + self.tick_seconds):
                 self.state.flags["first_reassessment_done"] = True
                 self.state.flags["initial_circulation_support_complete"] = True
                 self.state.flags["reassess_count"] = max(int(self.state.flags.get("reassess_count", 0)), 1)
@@ -1324,6 +1457,7 @@ class Simulator:
                 })
             else:
                 self.state.flags["premature_first_reassessment"] = True
+                self._record_order_violation(action_id, "首次治疗后复评发生在有效治疗或观察时间之前。")
                 self._log("action", action_id, {
                     "label": action.get("label", ""),
                     "gained": 0,
@@ -1334,8 +1468,10 @@ class Simulator:
 
         if action_id == "reassess_second":
             self._first_attempt(action_id)
-            if not self.state.flags.get("first_reassessment_done", False):
+            if (not self.state.flags.get("first_reassessment_done", False)
+                    or self.state.t < self.action_valid_time.get("reassess_first", self.state.t) + self.tick_seconds):
                 self.state.flags["premature_second_reassessment"] = True
+                self._record_order_violation(action_id, "第二次治疗后复评缺少第一次有效复评或新的观察时间。")
                 self._log("action", action_id, {
                     "label": action.get("label", ""),
                     "gained": 0,
@@ -1368,6 +1504,7 @@ class Simulator:
                 result = "第二次复评后完成家属沟通，计入收尾模块得分。"
             else:
                 self.state.flags["family_before_second_reassess"] = True
+                self._record_order_violation(action_id, "治疗后总结告知早于第二次有效复评。")
                 gained = 0
                 status = "conditional_not_met"
                 result = "已记录家属告知；但发生在第二次复评之前，不计入标准收尾分。"
@@ -1394,6 +1531,7 @@ class Simulator:
                 status = "valid"
                 result = "第二次复评和家属沟通后完成SBAR交接，计入收尾模块得分。"
             else:
+                self._record_order_violation(action_id, "阶段结束交接早于有效复评和总结告知。")
                 gained = 0
                 status = "conditional_not_met"
                 result = "已记录SBAR交接；需在第二次复评和家属告知后完成，才计入标准收尾分。"
@@ -1529,7 +1667,7 @@ class Simulator:
             self._first_attempt(action_id)
             self._enter_cardiac_arrest_if_needed()
             indicated = bool(self.state.flags.get("cardiac_arrest", False) or self.state.flags.get("cpr_required", False))
-            self.state.flags["cpr_done"] = True
+            self.state.flags["cpr_done"] = bool(indicated)
             self.state.flags["cpr_indicated"] = indicated
             if indicated:
                 self.state.flags["resuscitation_in_progress"] = True
@@ -1546,10 +1684,11 @@ class Simulator:
         if action_id == "bvm_ventilation":
             self._first_attempt(action_id)
             indicated = self._bvm_indicated()
-            self.state.flags["bvm_done"] = True
+            self.state.flags["bvm_done"] = bool(indicated)
             self.state.flags["bvm_required"] = bool(indicated)
             if indicated:
                 self.apply_effects(action.get("effects", {}))
+                self._mark_valid_completion(action_id)
                 self.state.flags["advanced_support_indicated_ever"] = True
                 self.state.flags["advanced_support_latest_reason"] = "bvm_ventilation_done_for_critical_branch"
                 status = "indicated"
@@ -1569,6 +1708,7 @@ class Simulator:
             after_epi = self.state.flags.get("epi_im_given", False)
             if after_epi and has_upper_airway:
                 self.apply_effects(action.get("effects", {}))
+                self._mark_valid_completion(action_id)
                 status = "valid_adjunct"
                 result = "存在上气道受累表现，雾化肾上腺素作为辅助处理已记录。"
             else:
@@ -1612,10 +1752,13 @@ class Simulator:
                 self._log("action", "penalty", {"action_id": action_id, "penalty": p, "reason": f"used_before_{flag_name}"})
 
         self.apply_effects(action.get("effects", {}))
+        if action_id != "check_bp":
+            self._mark_valid_completion(action_id)
         self._refresh_process_flags()
         self.state.grade = self.compute_grade()
         self._log("action", action_id, {"label": action.get("label", ""), "gained": gained, "t": self.state.t})
 
+    @numeric_command("epi_im_given", "dose_mg")
     def apply_epinephrine_dose(self, dose_mg: float, action_id: str = "im_epinephrine") -> Dict[str, Any]:
         """Apply IM epinephrine after dose verification.
 
@@ -1659,6 +1802,12 @@ class Simulator:
 
         is_repeat = action_id == "repeat_epinephrine"
         if is_repeat:
+            last_given = self.state.flags.get("last_effective_epi_time_sec")
+            minimum_interval = int(self.scenario["dynamics"].get("repeat_epinephrine_min_interval_seconds", 300))
+            if last_given is not None and self.state.t - last_given < minimum_interval:
+                self._log("action", "repeat_epinephrine_too_soon", {"interval_sec": self.state.t - last_given,
+                    "required_interval_sec": minimum_interval, "gained": 0})
+                return {"status": "too_soon", "message": "尚未达到病例设定的再次给药复评间隔；不得连续点击叠加剂量。", "dose_mg": dose, "target_dose_mg": target}
             if not (self.state.flags.get("epi_im_given", False) and self.state.flags.get("fluid_bolus_valid", False) and self.state.flags.get("first_reassessment_done", False)):
                 self.state.flags["repeat_epi_premature"] = True
                 self._log("action", "repeat_epinephrine_premature", {"dose_mg": round(dose, 3), "target_dose_mg": target, "gained": 0, "result": "premature"})
@@ -1708,7 +1857,9 @@ class Simulator:
             self._award_epinephrine_component_once("route_correct", 5, eligible=True)
             self._award_epinephrine_component_once("timing", 2, eligible=True)
 
-        if dose < target - tolerance:
+        # target is specified to 0.001 mg; form the inclusive decimal boundary
+        # before comparison (0.1 - 0.01 must not become 0.09000000000000001).
+        if dose < round(target - tolerance, 3):
             self.state.flags["epi_underdose_event"] = True
             self._log("action", "im_epinephrine_underdose" if not is_repeat else "repeat_epinephrine_underdose", {
                 "dose_mg": round(dose, 3),
@@ -1723,12 +1874,13 @@ class Simulator:
                 "target_dose_mg": target,
             }
 
-        dose_high = dose > target + tolerance
+        dose_high = dose > round(target + tolerance, 3)
         if dose_high:
             self.state.flags["epi_dose_high_event"] = True
 
         # Apply clinical effect. Initial epinephrine may score only if dose is correct.
         self._apply_action_effects_only("im_epinephrine")
+        self.state.flags["last_effective_epi_time_sec"] = int(self.state.t)
         if is_repeat:
             self.state.flags["repeat_epi_given"] = True
             self.state.flags["repeat_epi_indicated"] = True
@@ -1764,6 +1916,7 @@ class Simulator:
             "target_dose_mg": target,
         }
 
+    @numeric_command("fluid_bolus_valid", "volume_ml")
     def apply_fluid_bolus_volume(self, volume_ml: float) -> Dict[str, Any]:
         """Apply rapid crystalloid bolus after volume verification.
 
@@ -1874,6 +2027,7 @@ class Simulator:
             "max_ml": max_ml,
         }
 
+    @numeric_command("steroid_valid", "dose_mg")
     def apply_steroid_dose(self, dose_mg: float) -> Dict[str, Any]:
         """Apply glucocorticoid after dose verification.
 
@@ -2005,6 +2159,9 @@ class Simulator:
             and not self.state.flags.get("cardiac_arrest", False)
             and not self.state.flags.get("dead", False)
         )
+        ordinary_completed = bool(ordinary_completed and not self._unfinished_required_steps()
+            and self.state.grade <= 2 and self.state.vitals.get("SpO2", 0) >= 95
+            and self.state.vitals.get("SBP", 0) >= self.age_sbp_threshold())
         if ordinary_completed:
             self.state.flags["standard_assessment_completed"] = True
             self.state.flags["ordinary_exam_terminal"] = True
@@ -2170,6 +2327,12 @@ class Simulator:
             }
         return summary
 
+    def display_score(self) -> int:
+        """One score contract for live display and immutable reports."""
+        penalty = int(self.state.flags.get("academy_safety_penalty_points", 0) or 0) if self._is_academy_basic_case() else 0
+        return max(0, int(self.score) - penalty)
+
+    @isolated_result
     def build_report(self) -> Dict[str, Any]:
         grade_map = {1: "I", 2: "II", 3: "III", 4: "IV"}
         critical_actions = [a for a in self.actions if a.get("category", "").startswith("critical")]
@@ -2191,7 +2354,7 @@ class Simulator:
             elif aid == "steroid":
                 if not self.state.flags.get("steroid_valid", False):
                     missing.append(aid)
-            elif aid and aid not in self.action_first_time:
+            elif aid and aid not in self.action_valid_time:
                 missing.append(aid)
 
         def t_of(aid: str) -> Optional[int]:
@@ -2208,9 +2371,10 @@ class Simulator:
 
         f = self.state.flags
         academy_safety_penalty = int(f.get("academy_safety_penalty_points", 0) or 0) if self._is_academy_basic_case() else 0
-        display_score = max(0, int(self.score) - academy_safety_penalty)
+        display_score = self.display_score()
 
         report = {
+            "engine_revision": ENGINE_REVISION,
             "scenario_id": self.scenario["scenario"]["id"],
             "scenario_title": self.scenario["scenario"]["title"],
             "scenario_version": self.scenario["scenario"].get("version", ""),
@@ -2243,7 +2407,13 @@ class Simulator:
             "critical_missing": missing,
             "process_safety_issues": self._process_safety_issues(),
             "module_score_summary": self._module_score_summary(),
+            "action_valid_time": dict(self.action_valid_time),
             "clinical_pathway_flags": {
+                "academy_medication_checked": bool(f.get("academy_medication_checked", False)),
+                "academy_assisted_medication_done": bool(f.get("academy_assisted_medication_done", False)),
+                "drug_check_cooperation": bool(f.get("drug_check_cooperation", False)),
+                "order_violations": deepcopy(f.get("order_violations", {})),
+                "last_effective_epi_time_sec": f.get("last_effective_epi_time_sec"),
                 "initial_circulation_support_complete": bool(f.get("initial_circulation_support_complete", False)),
                 "repeat_epi_indicated": bool(f.get("repeat_epi_indicated", False)),
                 "repeat_epi_given": bool(f.get("repeat_epi_given", False)),

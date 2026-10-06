@@ -30,10 +30,10 @@ from peds_anaphylaxis_sim import scenario_loader  # noqa: E402
 
 
 EXPECTED_HASHES = {
-    "peds_ward_allergy_academy_initial.json": "ea4b0602126b2d9d93c4a9eb56b7bf95d4b52b6caea3d67acc0b372687adebee",
-    "peds_ward_allergy_academy_variant.json": "694d19aa42be2ca3151bf730d9eb9836031e4adc578a4a7359948c68b1b4e475",
-    "peds_ward_anaphylaxis_iv_initial.json": "6d181f88c8b6c3820927c58e98faa8464d8ac89501e0f67f4c5b108b511c7113",
-    "peds_ward_anaphylaxis_iv_variantA.json": "add6094c640b995958c213ae179b3424797e6434cd0fa676a91230c5643b402d",
+    "peds_ward_allergy_academy_initial.json": "3921241d529b28d8d4309455eab6a017e4899faa89779e12d336f1712e8d976b",
+    "peds_ward_allergy_academy_variant.json": "c379745d516e060df4b630674a223d0b01cb9d082032db2ddb172d34149e1e5f",
+    "peds_ward_anaphylaxis_iv_initial.json": "38c4d0e94e4b6e4fe4e5e2013ccd2f779b3f268673e5ea3d22cde567fb5432b1",
+    "peds_ward_anaphylaxis_iv_variantA.json": "07fc8f012712160fe03d27dae81270429725249c0f61c3b4a307d6687f735d8b",
 }
 
 
@@ -245,8 +245,8 @@ class ScenarioCatalogAndLoaderTests(unittest.TestCase):
             actual_hashes[entry.file_name] = hashlib.sha256(
                 entry.path.read_bytes()
             ).hexdigest()
-        self.assertEqual(action_count, 82)
-        self.assertEqual(rule_count, 44)
+        self.assertEqual(action_count, 88)
+        self.assertEqual(rule_count, 50)
         self.assertEqual(actual_hashes, EXPECTED_HASHES)
 
 

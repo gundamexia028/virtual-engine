@@ -1,0 +1,4 @@
+# Runtime dependencies are in app/requirements.txt. Resolve and freeze a local
+# lock only AFTER real-runtime/browser acceptance; no untested lock is claimed.
+coverage>=7.13,<8
+playwright>=1.57,<2

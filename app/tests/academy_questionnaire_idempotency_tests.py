@@ -65,6 +65,10 @@ from types import SimpleNamespace
 
 root = Path(sys.argv[1])
 sys.path.insert(0, str(root))
+import os
+if os.environ.get("VE_AUDIT_UNIT_DOUBLE") == "1":
+    import runpy
+    runpy.run_path(str(root / "tests" / "credential_security_tests.py"), run_name="stub_bootstrap")
 import streamlit_app as app
 app.APP_MODE = "production"
 
@@ -92,6 +96,10 @@ from types import SimpleNamespace
 
 root = Path(sys.argv[1])
 sys.path.insert(0, str(root))
+import os
+if os.environ.get("VE_AUDIT_UNIT_DOUBLE") == "1":
+    import runpy
+    runpy.run_path(str(root / "tests" / "credential_security_tests.py"), run_name="stub_bootstrap")
 import streamlit_app as app
 app.APP_MODE = "production"
 
@@ -171,12 +179,13 @@ class AcademyQuestionnaireIdempotencyTests(unittest.TestCase):
             collection_mode="测试演练",
         )
         app.start_simulation(ACADEMY_SCENARIO, mode, 123, fake.session_state.participant_id)
-        report = app.enrich_report(
-            fake.session_state.active_simulator.build_report(),
-            end_reason="success",
-        )
-        for index, key in enumerate(app.ACADEMY_POST_TEST_REQUIRED_TIMELINE_KEYS, start=1):
-            report.setdefault("key_timeline", {})[key] = index
+        # Use the actual engine path, not fabricated attempt timestamps.
+        sim = fake.session_state.active_simulator
+        for aid in app.ACADEMY_POST_TEST_REQUIRED_TIMELINE_KEYS:
+            sim.apply_action(aid)
+            sim.tick()
+        self.assertEqual(sim.is_done(), (True, "success"))
+        report = app.enrich_report(sim.build_report(), end_reason="success")
         return fake, report
 
     def _enter_questionnaire(self, mode="exam"):

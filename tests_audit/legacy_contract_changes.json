@@ -1,0 +1,74 @@
+[
+  {
+    "path": "app/peds_anaphylaxis_sim/__init__.py",
+    "reason": "Distinguish repaired engine/draft contract from input version; no release/acceptance implied.",
+    "old_sha256": "76b5c5a45343deb97b8f5dd6a142ba01d40036aa020b03421e1bd14b13c5d42f",
+    "new_sha256": "76b5c5a45343deb97b8f5dd6a142ba01d40036aa020b03421e1bd14b13c5d42f"
+  },
+  {
+    "path": "app/README.md",
+    "reason": "Current version heading only; historical documentation remains untouched.",
+    "old_sha256": "f6f7bc1b3efe48b2975408f096dc1c6563d57ccdeda1f06f3da10dcfd7c3c84c",
+    "new_sha256": "1db117fa8f0c179ee80dd45fb7b61a18f3ba240c91f83a9b80aee53428f63b4a"
+  },
+  {
+    "path": "app/tests/version_consistency_tests.py",
+    "reason": "Lock current package version; keep historical-document hashes.",
+    "old_sha256": "39cf13b9e0dd99f16974b761a7587b23cd97e52762a0fd90496c11f0c3984ce2",
+    "new_sha256": "2b146953a1c8a663abb829d5bdf0775daa3cb72fd35afcee74c57d3ab7790dcd"
+  },
+  {
+    "path": "app/tests/competition_mode_tests.py",
+    "reason": "Raw score must be explicitly provided, not invented by adding penalty; preserves expected raw=85 fixture.",
+    "old_sha256": "70329dc69de7be6ef0bdd8d21440532e2a235f609ecf8ffc4da37f30b83c71f0",
+    "new_sha256": "3c2e0d4d8649b3f7151003e63b979532b58ef1f4e56c0d382b639779b0e51976"
+  },
+  {
+    "path": "app/tests/review_live_vitals_hotfix_tests.py",
+    "reason": "Display reports engine values; elapsed wall-clock alone must not invent physiological changes.",
+    "old_sha256": "a4f133c30431514798af4aabdec29fb2b45d702e41e8865a1b9600e8174cdef9",
+    "new_sha256": "12021d9bee3e083d9109984e35c481b35f6ff380a0288703d6a052d2dfdb315a"
+  },
+  {
+    "path": "app/tests/full_workflow_validation.py",
+    "reason": "Twelve distinct academy stages; 88 declared actions; malformed numeric inputs rejected atomically.",
+    "old_sha256": "5decd28526835c183ddb5f11b7c6196bbfa5cca30593f14f8faf68f91690bc8c",
+    "new_sha256": "696fee054d14d16466d1155f4dcbfd40710ffc69d4c8789b5d1df563a2fbc0ca"
+  },
+  {
+    "path": "app/tests/competition_stability_tests.py",
+    "reason": "Remove alias contract; actual supervised medication after independent check; repeat records audit/no second effect.",
+    "old_sha256": "1680ee8c581aebdcd466146f0ae9cda883b45234ae9bee140dfb88823a632d90",
+    "new_sha256": "f3fe7aa41cf793e4792e141c129a5dcd2eb0ac269a6b90ff0e98f598611bbe28"
+  },
+  {
+    "path": "app/tests/academy_questionnaire_idempotency_tests.py",
+    "reason": "Questionnaire fixture now really completes 12 stages; explicit unit-double child bootstrap only under audit flag, never counted as browser.",
+    "old_sha256": "adee3e340002cb3a85ec002dc3b24ac10146b926245e050b42acc590fc25bcac",
+    "new_sha256": "6859f9d52c77e8fe11ff249acebd369d512c601fe706ff2558ec29c4148f3748"
+  },
+  {
+    "path": "app/tests/golden_behavior_tests.py",
+    "reason": "Preserve v1.3.8 golden unchanged; new versioned contract requires actual check/admin. New golden has separate independent directed assertions and semantic diff.",
+    "old_sha256": "2bda388b795dbb5d750bc7554436137dcf6afe378d077c86dd4e5a1f6d0b8226",
+    "new_sha256": "26747233e2085801118f7390b0efce54bf53c27c36eec4c4d8dcc4d170484559"
+  },
+  {
+    "path": "app/tests/scenario_contract_tests.py",
+    "reason": "Pin 4 repaired scenario bytes, 88 actions/50 rules; original source hashes remain in baseline ZIP and audit mapping.",
+    "old_sha256": "e327fad3f8c96047f04f8860e8f2d8c50ecd6c3be7aa6919c669e4e4e5ebd7f9",
+    "new_sha256": "25ed38f032fde360ef8ed470ad4e69939ea174f70b835cf69ca28821e7bef1b0"
+  },
+  {
+    "path": "app/tests/scenario_loader_tests.py",
+    "reason": "Pin 4 repaired scenario bytes, 88 actions/50 rules; original source hashes remain in baseline ZIP and audit mapping.",
+    "old_sha256": "f0a06eef2012a23c5613a13c4cbc6f24061b4f22a6d48c2858680df78e940628",
+    "new_sha256": "e88f6fcf4c739ca2752a62ccacf2a3651ec38cdd440b51785888ac2dd7e5a08b"
+  },
+  {
+    "path": "app/tests/version_consistency_tests.py",
+    "reason": "Pin 4 repaired scenario bytes, 88 actions/50 rules; original source hashes remain in baseline ZIP and audit mapping.",
+    "old_sha256": "2b146953a1c8a663abb829d5bdf0775daa3cb72fd35afcee74c57d3ab7790dcd",
+    "new_sha256": "c045e2128b8815b242a542b997964f18954c196188d63e99effaad3a5100099c"
+  }
+]

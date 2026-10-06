@@ -1,0 +1,14 @@
+# 源码与证据链
+
+CP01_BASELINE_REPRODUCTION：本次原包复现、原始源码快照。
+CP02_INTEGRITY_REPAIR：对象隔离、数值和表达式边界。
+CP03_PATHWAYS_REPAIR：流程/有效完成/治疗与成功条件。
+CP04_UI_COMMAND_REPAIR：回调、输入面板、稳定键和旧事件防护。
+CP05_LEGACY_CONTRACT_ALIGNMENT：旧测试契约纠偏、保留原黄金。
+CP06_EXTENDED_INTEGRITY_REPAIR：额外复现和低剂量/终态等防线。
+CP07_BOUNDED_MATRIX_AND_RUNTIME_HARNESS：最终边界修复、有限枚举、真实浏览器入口及运行阻断证据。
+CP08_FINAL_HANDOFF：最终报告、完整代码/差异/清单、交付包装验证。
+
+每个目录都有实际source_snapshot.zip、changes_from_baseline.diff、source_manifest.json和checkpoint.json。测试日志在统一evidence目录；checkpoint中的evidence_at_checkpoint列出在该检查点已经存在的证据及其SHA。早期快照元数据只覆盖当时顶层日志，后续改为递归登记；早期nested日志由实际文件、目录、最终证据总manifest提供运输校验，不能补写为当时已递归哈希。
+
+前期失败或被调用时限中断的日志保留。最终验收以FINAL_VERIFIED/aggregate.json中逐条引用的证据为准，不以最后一行“PASS”替代源轨迹，也不把中间旧结果覆盖掉。CP08源快照在包装验证前保存；随后的包装验证为该快照的补充证据，不反向伪造检查点时间。

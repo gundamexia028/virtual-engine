@@ -1,102 +1,48 @@
-name: Python tests
-
+name: Virtual-Engine offline-safe acceptance
 on:
+  workflow_dispatch:
   push:
-    branches:
-      - develop
+    branches: [develop, review-deploy]
   pull_request:
-    branches:
-      - develop
-      - main
-
+    branches: [develop, main, review-deploy]
 permissions:
   contents: read
-
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: app
+    timeout-minutes: 30
     env:
       SUPABASE_URL: ""
       SUPABASE_KEY: ""
       SUPABASE_ANON_KEY: ""
       SUPABASE_SERVICE_ROLE_KEY: ""
-
+      PYTHONDONTWRITEBYTECODE: "1"
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.13
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: '3.13'
           cache: pip
-          cache-dependency-path: app/requirements.txt
-
-      - name: Install dependencies
+          cache-dependency-path: |
+            app/requirements.txt
+            tests_audit/requirements-test.txt
+      - name: Install real runtime and test dependencies
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-
-      - name: Prepare ephemeral test configuration
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import secrets
-
-          target = Path(".streamlit/secrets.toml")
-          target.parent.mkdir(parents=True, exist_ok=True)
-          access_code = secrets.token_urlsafe(24)
-          admin_password = secrets.token_urlsafe(32)
-          while admin_password == access_code:
-              admin_password = secrets.token_urlsafe(32)
-          target.write_text(
-              f'APP_ACCESS_CODE = "{access_code}"\n'
-              f'ADMIN_PASSWORD = "{admin_password}"\n',
-              encoding="utf-8",
-          )
-          PY
-
-      - name: Run all test scripts
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import subprocess
-          import sys
-
-          test_files = sorted(Path("tests").glob("*.py"))
-          if not test_files:
-              raise SystemExit("No test files found.")
-
-          failed = []
-          for test_file in test_files:
-              print(f"::group::{test_file}")
-              result = subprocess.run([sys.executable, str(test_file)], check=False)
-              print("::endgroup::")
-              if result.returncode:
-                  failed.append(str(test_file))
-
-          if failed:
-              raise SystemExit("Failed test scripts: " + ", ".join(failed))
-          PY
-
-      - name: Remove ephemeral test files
+          python -m pip install -r app/requirements.txt -r tests_audit/requirements-test.txt
+          python -m playwright install --with-deps chromium
+          python -m pip freeze > runtime-resolved.txt
+      - name: Real-runtime regressions and bounded matrix (no mock opt-in)
+        run: python tests_audit/run_regressions.py --out audit_results/regressions --with-matrix --coverage
+      - name: Loopback-only real browser acceptance
+        run: python tests_audit/real_browser_acceptance.py --out audit_results/browser
+      - name: Retain failures and successful evidence
         if: always()
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import shutil
-
-          Path(".streamlit/secrets.toml").unlink(missing_ok=True)
-          for name in ("__pycache__", ".pytest_cache", ".runtime", "runs", "runs_web"):
-              for directory in Path(".").rglob(name):
-                  if directory.is_dir():
-                      shutil.rmtree(directory, ignore_errors=True)
-          for pattern in ("*.pyc", "*.jsonl", "*.log", "*.sqlite", "*.sqlite3", "*.db"):
-              for file_path in Path(".").rglob(pattern):
-                  if file_path.is_file():
-                      file_path.unlink(missing_ok=True)
-          PY
+        uses: actions/upload-artifact@v4
+        with:
+          name: virtual-engine-acceptance-evidence
+          path: |
+            audit_results/
+            runtime-resolved.txt
+          if-no-files-found: warn
+      # No recursive deletion of *.jsonl: reviewed synthetic demo fixtures stay intact.
+      # Test scripts isolate ephemeral credentials/runtime data in temporary paths.

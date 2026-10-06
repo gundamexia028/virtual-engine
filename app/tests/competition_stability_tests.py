@@ -93,6 +93,8 @@ def run_compliant_path(
     if include_wait:
         simulator.apply_action("watch_only")
         simulator.tick()
+    simulator.apply_action("academy_medication_check")
+    simulator.tick()
     result = apply_academy_action(
         simulator,
         ACADEMY_ASSISTED_MEDICATION_ACTION_ID,
@@ -109,7 +111,7 @@ def run_compliant_path(
 
 
 class AcademyMedicationCooperationTests(unittest.TestCase):
-    def test_assisted_medication_is_hidden_before_preparation(self):
+    def test_assisted_medication_is_registered_but_cannot_complete_before_preparation(self):
         sim = academy_simulator()
         action_ids = [
             action["id"]
@@ -118,7 +120,10 @@ class AcademyMedicationCooperationTests(unittest.TestCase):
                 sim.state.flags,
             )
         ]
-        self.assertNotIn(ACADEMY_ASSISTED_MEDICATION_ACTION_ID, action_ids)
+        self.assertIn(ACADEMY_ASSISTED_MEDICATION_ACTION_ID, action_ids)
+        result = apply_academy_action(sim, ACADEMY_ASSISTED_MEDICATION_ACTION_ID)
+        self.assertFalse(result["valid_completion"])
+        self.assertFalse(sim.state.flags["epi_im_given"])
 
     def test_assisted_medication_appears_after_preparation(self):
         sim = academy_simulator()
@@ -133,38 +138,33 @@ class AcademyMedicationCooperationTests(unittest.TestCase):
         self.assertIn(ACADEMY_ASSISTED_MEDICATION_ACTION_ID, action_ids)
         self.assertIn("student_independent_epinephrine", action_ids)
 
-    def test_assisted_medication_maps_to_existing_core_action(self):
+    def test_assisted_medication_is_a_separate_validated_core_action(self):
         sim = academy_simulator()
-        sim.apply_action("prepare_rescue_equipment")
-        result = apply_academy_action(
-            sim,
-            ACADEMY_ASSISTED_MEDICATION_ACTION_ID,
-        )
+        for aid in ("stop_infusion", "call_help", "prepare_rescue_equipment", "academy_medication_check"):
+            sim.apply_action(aid)
+        self.assertFalse(sim.state.flags["epi_im_given"])
+        result = apply_academy_action(sim, ACADEMY_ASSISTED_MEDICATION_ACTION_ID)
         self.assertTrue(result["executed"])
-        self.assertEqual(result["core_action_id"], "prepare_rescue_equipment")
-        self.assertTrue(sim.state.flags["rescue_equipment_prepared"])
+        self.assertTrue(result["valid_completion"])
+        self.assertEqual(result["core_action_id"], ACADEMY_ASSISTED_MEDICATION_ACTION_ID)
         self.assertTrue(sim.state.flags["academy_assisted_medication_done"])
-        self.assertEqual(sim.log[-1].message, "prepare_rescue_equipment")
-        self.assertEqual(
-            sim.log[-1].data["label"],
-            ACADEMY_ASSISTED_MEDICATION_FULL_LABEL,
-        )
+        self.assertTrue(sim.state.flags["epi_im_given"])
+        self.assertEqual(sim.log[-1].message, ACADEMY_ASSISTED_MEDICATION_ACTION_ID)
 
     def test_assisted_medication_ui_repeat_is_idempotent(self):
         sim = academy_simulator()
-        sim.apply_action("prepare_rescue_equipment")
-        first = apply_academy_action(
-            sim,
-            ACADEMY_ASSISTED_MEDICATION_ACTION_ID,
-        )
-        action_count = len(sim.log)
-        second = apply_academy_action(
-            sim,
-            ACADEMY_ASSISTED_MEDICATION_ACTION_ID,
-        )
+        for aid in ("stop_infusion", "call_help", "prepare_rescue_equipment", "academy_medication_check"):
+            sim.apply_action(aid)
+        first = apply_academy_action(sim, ACADEMY_ASSISTED_MEDICATION_ACTION_ID)
+        from copy import deepcopy
+        before = deepcopy(sim.state)
+        score = sim.score
+        second = apply_academy_action(sim, ACADEMY_ASSISTED_MEDICATION_ACTION_ID)
         self.assertTrue(first["executed"])
         self.assertFalse(second["executed"])
-        self.assertEqual(len(sim.log), action_count)
+        self.assertEqual(sim.state, before)
+        self.assertEqual(sim.score, score)
+        self.assertEqual(sim.log[-1].data["status"], "already_completed")
 
     def test_pretest_completes_without_independent_injection(self):
         sim = academy_simulator("exam")
