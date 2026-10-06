@@ -20,7 +20,7 @@ def main():
  if missing:
   status['reason']='Missing real application runtime; NO fake Streamlit/server substituted.'
   (out/'browser_result.json').write_text(json.dumps(status,indent=2,ensure_ascii=False));print(json.dumps(status,ensure_ascii=False));return 2
- from playwright.sync_api import sync_playwright
+ from playwright.sync_api import sync_playwright,expect
  processes=[];handles=[]
  def port():
   with socket.socket() as s:s.bind(('127.0.0.1',0));return s.getsockname()[1]
@@ -87,15 +87,26 @@ def main():
     for _ in range(6):
      old=read();page.locator(f'.st-key-advance_time_{old["session_id"]}').get_by_role('button').click();changed(old)
     after=read();assert after['vitals']!=before['vitals']
-    time.sleep(3);assert page.locator('.vital-grid').count()>0 and page.locator('.action-head').count()>0
+    time.sleep(3);expect(page.locator('.vital-grid')).to_be_visible(timeout=15000);expect(page.locator('.action-head')).to_be_visible(timeout=15000)
     page.screenshot(path=str(out/'continuous_actions_complete_page.png'),full_page=True)
-    page.reload();read();assert page.locator('.vital-grid').count()>0
+    page.reload();read()
+    # The markdown oracle can mount before the independently lazy-loaded st.html panel.
+    # Require both actual rendered regions to become visible; state alone is not readiness.
+    expect(page.locator('.vital-grid')).to_be_visible(timeout=15000)
+    expect(page.locator('.action-head')).to_be_visible(timeout=15000)
+    page.screenshot(path=str(out/'refresh_complete_page.png'),full_page=True)
     assert not console,console
     (out/'page_errors.json').write_text(json.dumps(console,ensure_ascii=False,indent=2))
     context.tracing.stop(path=str(out/'playwright_trace.zip'));context.close();browser.close()
     status['status']='PASS_SCOPED_BROWSER_INTEGRATION';status['reason']='Production entry auth/mode smoke + eight seeded case/mode render workflows. Full registration/SUS/admin E2E still outside this fixture.'
  except Exception as exc:
   status.update(status='FAIL',error=repr(exc),traceback=traceback.format_exc())
+  try:
+   # Fixture-only synthetic state and region counts; never collect login inputs/secrets.
+   status['failure_region_counts']={selector:page.locator(selector).count() for selector in ('#audit-state','.vital-grid','.action-head')}
+   if status['failure_region_counts']['#audit-state']==1:
+    status['failure_observed_state']=json.loads(page.locator('#audit-state').inner_text(timeout=1000))
+  except Exception:pass
   try:page.screenshot(path=str(out/'failure.png'),full_page=True);context.tracing.stop(path=str(out/'failure_trace.zip'))
   except Exception:pass
  finally:
