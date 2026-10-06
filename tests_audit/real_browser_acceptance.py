@@ -39,10 +39,17 @@ def main():
    clone=Path(tmp)/'repo';shutil.copytree(ROOT,clone,ignore=shutil.ignore_patterns('__pycache__','.git','.venv','audit_results','htmlcov','runs','runs_web','.runtime','secrets.toml','org_access_codes.json'))
    env=dict(os.environ);env.update(APP_MODE='production',VE_AUDIT_BROWSER_FIXTURE='1',APP_ACCESS_CODE=secrets.token_urlsafe(24),ADMIN_PASSWORD=secrets.token_urlsafe(32),AUTH_CONTEXT_SIGNING_KEY=secrets.token_urlsafe(40),PEDSIM_RESULTS_DIR=str(Path(tmp)/'runs'),PEDSIM_DRAFTS_DIR=str(Path(tmp)/'drafts'))
    for k in ('SUPABASE_URL','SUPABASE_KEY','SUPABASE_ANON_KEY','SUPABASE_SERVICE_ROLE_KEY'):env[k]=''
+   # Production authentication intentionally reads st.secrets, not environment fallbacks.
+   # Supply only synthetic credentials inside this disposable clone; never log them.
+   auth_file=clone/'app/.streamlit/secrets.toml'
+   auth_file.parent.mkdir(parents=True,exist_ok=True)
+   auth_file.touch(mode=0o600,exist_ok=False)
+   auth_file.write_text('\n'.join(f'{key} = {json.dumps(env[key])}' for key in
+       ('APP_ACCESS_CODE','ADMIN_PASSWORD','AUTH_CONTEXT_SIGNING_KEY'))+'\n',encoding='utf-8')
    pw=sync_playwright().start()
    if True:
     browser=pw.chromium.launch(headless=True,**({'executable_path':exe} if exe else {}))
-    context=browser.new_context(viewport={'width':1440,'height':1100});context.tracing.start(screenshots=True,snapshots=True,sources=True)
+    context=browser.new_context(viewport={'width':1440,'height':1100})
     # Block all non-loopback HTTP traffic, including optional analytics/storage.
     context.route('**/*',lambda route:route.continue_() if route.request.url.startswith(('http://127.0.0.1:','http://localhost:','data:','blob:')) else route.abort())
     page=context.new_page();console=[];page.on('pageerror',lambda err:console.append(str(err)))
@@ -50,6 +57,8 @@ def main():
     page.goto(actual);page.get_by_label('访问码',exact=True).fill(env['APP_ACCESS_CODE']);page.get_by_role('button',name='进入系统',exact=True).click()
     page.get_by_role('button',name='进入临床模式',exact=True).wait_for();page.get_by_role('button',name='进入学院模式',exact=True).wait_for()
     status['production_auth_smoke_executed']=True;page.screenshot(path=str(out/'production_entry_modes.png'),full_page=True)
+    # Start trace after login so the synthetic access-code fill is not recorded.
+    context.tracing.start(screenshots=True,snapshots=True,sources=True)
     fixture=server(clone/'tests_audit/browser_fixture_app.py',env,clone/'app','fixture')
     page.goto(fixture)
     def read():return json.loads(page.locator('#audit-state').inner_text(timeout=15000))
@@ -64,7 +73,7 @@ def main():
      changed(before)
     for case in CASES:
      if read()['case']!=case:
-      page.get_by_role('combobox').first.click();page.get_by_role('option',name=case,exact=True).click();page.wait_for_function('(c)=>document.querySelector("#audit-state")&&JSON.parse(document.querySelector("#audit-state").textContent).case===c',arg=case)
+      page.get_by_label('审计病例组合',exact=True).click();page.get_by_role('option',name=case,exact=True).click();page.wait_for_function('(c)=>document.querySelector("#audit-state")&&JSON.parse(document.querySelector("#audit-state").textContent).case===c',arg=case)
      for aid in ACADEMY if case.startswith('academy') else CLINICAL:action(aid)
      final=read();assert final['end'][0] and final['score']==100,(case,final)
      status['case_results'].append({'case':case,'status':'PASS','t':final['t'],'score':final['score'],'end':final['end']});status['app_interaction_cases_executed']+=1
