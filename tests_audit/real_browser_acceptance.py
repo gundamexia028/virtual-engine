@@ -64,12 +64,15 @@ def main():
     def read():return json.loads(page.locator('#audit-state').inner_text(timeout=15000))
     def changed(prev):
      page.wait_for_function('(old)=>{let e=document.querySelector("#audit-state");if(!e)return false;let s=JSON.parse(e.textContent);return s.session_id!==old.session_id||s.log_n!==old.log_n||s.t!==old.t}',arg=prev,timeout=15000)
+    # Help-enabled Streamlit buttons have desktop/mobile DOM copies. Role locators
+    # exclude the hidden copy while still failing if multiple accessible buttons exist.
     def action(aid):
-     before=read();sid=before['session_id'];page.locator(f'.st-key-action_{sid}_{aid} button').click()
+     before=read();sid=before['session_id'];page.locator(f'.st-key-action_{sid}_{aid}').get_by_role('button').click()
      if aid in ('im_epinephrine','fluid_bolus','steroid'):
       kind={'im_epinephrine':'epinephrine','fluid_bolus':'fluid','steroid':'steroid'}[aid]
       v=min(.01*before['weight'],.3) if aid=='im_epinephrine' else (10*before['weight'] if aid=='fluid_bolus' else min(before['weight'],40))
-      page.get_by_role('spinbutton').fill(str(v));page.locator(f'.st-key-confirm_{kind}_{sid} button').click()
+      input_label={'epinephrine':'本次肌注总剂量（mg）','fluid':'本次快速补液容量（ml）','steroid':'本次甲泼尼龙剂量（mg）'}[kind]
+      page.get_by_role('spinbutton',name=input_label,exact=True).fill(str(v));page.locator(f'.st-key-confirm_{kind}_{sid}').get_by_role('button').click()
      changed(before)
     for case in CASES:
      if read()['case']!=case:
@@ -79,10 +82,10 @@ def main():
      status['case_results'].append({'case':case,'status':'PASS','t':final['t'],'score':final['score'],'end':final['end']});status['app_interaction_cases_executed']+=1
      page.screenshot(path=str(out/(case+'.png')),full_page=True)
     # An idle render and rapid action sequence must preserve all principal regions.
-    page.get_by_role('button',name='重新开始审计病例',exact=True).click();read()
+    before_reset=read();page.get_by_role('button',name='重新开始审计病例',exact=True).click();changed(before_reset)
     action('stop_infusion');action('call_help');before=read()
     for _ in range(6):
-     old=read();page.locator(f'.st-key-advance_time_{old["session_id"]} button').click();changed(old)
+     old=read();page.locator(f'.st-key-advance_time_{old["session_id"]}').get_by_role('button').click();changed(old)
     after=read();assert after['vitals']!=before['vitals']
     time.sleep(3);assert page.locator('.vital-grid').count()>0 and page.locator('.action-head').count()>0
     page.screenshot(path=str(out/'continuous_actions_complete_page.png'),full_page=True)
