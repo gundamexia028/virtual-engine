@@ -69,8 +69,31 @@ def main():
     def action_key(aid):
      page.wait_for_function('(aid)=>Array.from(document.querySelectorAll("[class*=st-key-action_]")).flatMap(n=>Array.from(n.classList)).filter(c=>c.startsWith("st-key-action_")&&c.endsWith("_"+aid)).length===1',arg=aid,timeout=15000)
      return page.locator('[class*="st-key-action_"]').evaluate_all('(nodes,aid)=>{let a=nodes.flatMap(n=>Array.from(n.classList)).filter(c=>c.startsWith("st-key-action_")&&c.endsWith("_"+aid));if(a.length!==1)throw Error("Expected one action key: "+aid+"; "+a);return a[0]}',aid)
+    def settled_history(expected=None,mode='read',timeout=15000):
+     # Streamlit retains old and new blocks during a rerun. Observe count,
+     # script state and full innerText atomically; do not pick an arbitrary panel.
+     text=page.evaluate("""({expected,mode,timeout})=>new Promise((resolve,reject)=>{
+      const started=performance.now();let since=null,lastText=null,lastState=null;
+      const sample=()=>{
+       const apps=document.querySelectorAll('[data-testid="stApp"]');
+       const panels=document.querySelectorAll('.history-panel');
+       const scriptState=apps.length===1?apps[0].getAttribute('data-test-script-state'):null;
+       const text=panels.length===1?panels[0].innerText:null;
+       const matches=mode==='read'||(mode==='equal'?text===expected:text!==expected);
+       const ready=apps.length===1&&scriptState==='notRunning'&&panels.length===1&&matches;
+       lastState={appCount:apps.length,scriptState,panelCount:panels.length,text};
+       if(performance.now()-started>=timeout)return reject(Error('History did not settle: '+JSON.stringify(lastState)));
+       if(ready){if(since===null||text!==lastText)since=performance.now();
+        if(performance.now()-since>=150)return resolve(text);
+       }else since=null;
+       lastText=text;
+       setTimeout(sample,25);
+      };sample();
+     })""",{'expected':expected,'mode':mode,'timeout':timeout})
+     expect(page.locator('.history-panel')).to_have_count(1,timeout=timeout)
+     return text
     def real_action(aid,completion=''):
-     key=action_key(aid);before_history=page.locator('.history-panel').inner_text()
+     before_history=settled_history();key=action_key(aid)
      if aid in ('im_epinephrine','fluid_bolus','steroid'):
       match=re.search(r'(\d+(?:\.\d+)?)\s*kg',page.locator('.patient-meta').inner_text())
       assert match,'Patient body weight must be visible before dosing'
@@ -107,8 +130,14 @@ def main():
       page.get_by_role('spinbutton',name=label,exact=True).fill(str(value))
       sid=key[len('st-key-action_'):-(len(aid)+1)]
       page.locator(f'.st-key-confirm_{kind}_{sid}').get_by_role('button').click()
-     if completion:expect(page.get_by_text(completion,exact=True)).to_be_visible(timeout=15000)
-     else:expect(page.locator('.history-panel')).not_to_have_text(before_history,use_inner_text=True,timeout=15000)
+     if completion:
+      expect(page.get_by_text(completion,exact=True)).to_have_count(1,timeout=15000)
+      expect(page.locator('[data-testid="stApp"]')).to_have_attribute('data-test-script-state','notRunning',timeout=15000)
+      expect(page.get_by_text(completion,exact=True)).to_have_count(1,timeout=15000)
+      expect(page.get_by_text(completion,exact=True)).to_be_visible(timeout=15000)
+     else:
+      settled_history(before_history,'changed')
+      expect(page.locator('.history-panel')).not_to_have_text(before_history,use_inner_text=True,timeout=15000)
      expect(page.locator('[data-testid="stException"]')).to_have_count(0)
      if tooltip_probe is not None:
       expect(page.locator('.history-item')).to_have_count(tooltip_probe['before_count']+1)
@@ -131,11 +160,12 @@ def main():
     select_text('采集模式（必填）','测试演练')
     click_text('保存信息并进入学院模式');click_text('开始本阶段')
     real_action('allergy_identification');real_action('stop_infusion')
-    saved_key=action_key('call_help');saved_history=page.locator('.history-panel').inner_text()
+    saved_history=settled_history();saved_key=action_key('call_help')
     saved_url=page.url
     assert 'resume=' in saved_url,saved_url
     page.reload()
     expect(page.locator('.'+saved_key).get_by_role('button')).to_be_visible(timeout=15000)
+    settled_history(saved_history,'equal')
     expect(page.locator('.history-panel')).to_have_text(saved_history,use_inner_text=True,timeout=15000)
     assert page.url==saved_url
     status.setdefault('production_flow_checks',[]).append({'check':'production_refresh_preserves_session_and_action_history','status':'PASS'})
