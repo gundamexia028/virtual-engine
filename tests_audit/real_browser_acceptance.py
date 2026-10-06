@@ -84,7 +84,7 @@ def main():
       sid=key[len('st-key-action_'):-(len(aid)+1)]
       page.locator(f'.st-key-confirm_{kind}_{sid}').get_by_role('button').click()
      if completion:expect(page.get_by_text(completion,exact=True)).to_be_visible(timeout=15000)
-     else:expect(page.locator('.history-panel')).not_to_have_text(before_history,timeout=15000)
+     else:expect(page.locator('.history-panel')).not_to_have_text(before_history,use_inner_text=True,timeout=15000)
      expect(page.locator('[data-testid="stException"]')).to_have_count(0)
     def finish_academy(completion='',skip=()):
      for aid in ACADEMY:
@@ -104,7 +104,7 @@ def main():
     assert 'resume=' in saved_url,saved_url
     page.reload()
     expect(page.locator('.'+saved_key).get_by_role('button')).to_be_visible(timeout=15000)
-    expect(page.locator('.history-panel')).to_have_text(saved_history,timeout=15000)
+    expect(page.locator('.history-panel')).to_have_text(saved_history,use_inner_text=True,timeout=15000)
     assert page.url==saved_url
     status.setdefault('production_flow_checks',[]).append({'check':'production_refresh_preserves_session_and_action_history','status':'PASS'})
     finish_academy('课前测评完成',skip=('allergy_identification','stop_infusion'));assert_score('100/100')
