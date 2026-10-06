@@ -75,7 +75,31 @@ def main():
       match=re.search(r'(\d+(?:\.\d+)?)\s*kg',page.locator('.patient-meta').inner_text())
       assert match,'Patient body weight must be visible before dosing'
       weight=float(match.group(1))
-     page.locator('.'+key).get_by_role('button').click()
+     tooltip_probe=None
+     button=page.locator('.'+key).get_by_role('button')
+     if aid=='check_bp':
+      # Real hover/focus history: prior monitor action remains focused. Do not
+      # dismiss its help, hit Escape, click whitespace or force the next click.
+      monitor=page.locator('.'+action_key('connect_monitor')).get_by_role('button')
+      monitor.hover()
+      trigger=monitor.locator('..')
+      expect(trigger).to_have_attribute('aria-describedby',re.compile('.+'),timeout=15000)
+      tooltip_id=trigger.get_attribute('aria-describedby')
+      tooltip=page.locator(f'[role="tooltip"][id="{tooltip_id}"] [data-testid="stTooltipContent"]')
+      expect(tooltip).to_be_visible(timeout=15000)
+      help_text=tooltip.inner_text()
+      expected_help={a['label'] for scenario_file in (clone/'app/peds_anaphylaxis_sim/scenarios').glob('*.json')
+                     for a in json.loads(scenario_file.read_text())['actions'] if a['id']=='connect_monitor'}
+      assert help_text in expected_help,help_text
+      pointer_events=tooltip.evaluate('(n)=>[n,...n.querySelectorAll("*")].map(e=>getComputedStyle(e).pointerEvents)')
+      assert pointer_events and all(value=='none' for value in pointer_events),pointer_events
+      tooltip_probe={'id':tooltip_id,'help':help_text,'pointer_events':pointer_events,
+                     'before_count':page.locator('.history-item').count(),
+                     'before_time':page.locator('.history-time').first.inner_text()}
+      target=button.bounding_box()
+      if target and 0<=target['x']+target['width']/2<=page.viewport_size['width'] and 0<=target['y']+target['height']/2<=page.viewport_size['height']:
+       page.mouse.move(target['x']+target['width']/2,target['y']+target['height']/2)
+     button.click()  # one ordinary click, never force=True or a retry click
      if aid in ('im_epinephrine','fluid_bolus','steroid'):
       kind,label,value={'im_epinephrine':('epinephrine','本次肌注总剂量（mg）',min(weight*.01,.3)),
                         'fluid_bolus':('fluid','本次快速补液容量（ml）',weight*10),
@@ -86,6 +110,14 @@ def main():
      if completion:expect(page.get_by_text(completion,exact=True)).to_be_visible(timeout=15000)
      else:expect(page.locator('.history-panel')).not_to_have_text(before_history,use_inner_text=True,timeout=15000)
      expect(page.locator('[data-testid="stException"]')).to_have_count(0)
+     if tooltip_probe is not None:
+      expect(page.locator('.history-item')).to_have_count(tooltip_probe['before_count']+1)
+      after_time=page.locator('.history-time').first.inner_text()
+      def elapsed(value):
+       minutes,seconds=map(int,value.split(':'));return 60*minutes+seconds
+      assert elapsed(after_time)==elapsed(tooltip_probe['before_time'])+30,(tooltip_probe,after_time)
+      tooltip_probe.update(after_time=after_time,after_count=page.locator('.history-item').count(),status='PASS')
+      status.setdefault('tooltip_single_click_checks',[]).append(tooltip_probe)
     def finish_academy(completion='',skip=()):
      for aid in ACADEMY:
       if aid not in skip:real_action(aid,completion if aid==ACADEMY[-1] else '')
@@ -130,17 +162,45 @@ def main():
     expect(page.locator('.action-head')).to_be_visible(timeout=15000)
     expect(page.locator('[data-testid="stException"]')).to_have_count(0)
     clinical_labels={a['id']:a['label'] for a in json.loads((clone/'app/peds_anaphylaxis_sim/scenarios/peds_ward_anaphylaxis_iv_initial.json').read_text())['actions']}
+    def stable_sidebar():
+     # is_visible() includes offscreen nodes. Wait for resize/collapse animations
+     # and stable actual geometry, then decide whether a click is even needed.
+     return page.evaluate("""async()=>await new Promise((resolve,reject)=>{
+      const started=performance.now();let previous='',same=0;
+      function sample(){
+       const side=document.querySelector('[data-testid="stSidebar"]');
+       const close=document.querySelector('[data-testid="stSidebarCollapseButton"] button');
+       const rect=side?.getBoundingClientRect();const cr=close?.getBoundingClientRect();
+       const collapsed=!side||!rect||rect.width===0||rect.right<=1||getComputedStyle(side).visibility==='hidden';
+       const center=cr?{x:cr.left+cr.width/2,y:cr.top+cr.height/2}:null;
+       const state={collapsed,side_right:rect?.right??null,close_center:center,
+          close_in_view:!!(center&&cr.width>0&&cr.height>0&&center.x>=0&&center.x<innerWidth&&center.y>=0&&center.y<innerHeight)};
+       const signature=JSON.stringify(state);same=signature===previous?same+1:0;previous=signature;
+       const running=side?.getAnimations({subtree:true}).some(a=>a.playState==='running')??false;
+       if(performance.now()-started>250&&same>=5&&!running)return resolve(state);
+       if(performance.now()-started>5000)return reject(Error('Sidebar failed to settle: '+signature));
+       requestAnimationFrame(sample);
+      }sample();
+     })""")
     for viewport in ({'width':1180,'height':757},{'width':1366,'height':768},{'width':390,'height':844}):
      page.set_viewport_size(viewport)
-     collapse=page.locator('[data-testid="stSidebarCollapseButton"] button')
-     if viewport['width']==390 and collapse.count() and collapse.is_visible():collapse.click()
+     sidebar_before=stable_sidebar()
+     if viewport['width']==390 and not sidebar_before['collapsed']:
+      assert sidebar_before['close_in_view'],sidebar_before
+      page.locator('[data-testid="stSidebarCollapseButton"] button').click()
+      sidebar_after=stable_sidebar()
+      assert sidebar_after['collapsed'],sidebar_after
+     elif viewport['width']==390:
+      sidebar_after=sidebar_before  # responsive layout already collapsed; no click
+     else:sidebar_after=sidebar_before
+     status.setdefault('viewport_sidebar_checks',[]).append({'viewport':viewport,'before':sidebar_before,'after':sidebar_after})
      expect(page.locator('.vital-grid')).to_be_visible(timeout=15000)
      expect(page.locator('.action-head')).to_be_visible(timeout=15000)
      label_geometry=page.locator('[class*="st-key-action_"] button').evaluate_all("""nodes=>nodes.filter(n=>n.getClientRects().length&&getComputedStyle(n).visibility!=='hidden').map(button=>{
       let b=button.getBoundingClientRect();let texts=Array.from(button.querySelectorAll('p,[data-testid="stMarkdownContainer"]')).filter(n=>n.getClientRects().length);
       return {key:Array.from(button.closest('[class*=st-key-action_]').classList).find(c=>c.startsWith('st-key-action_')),label:button.innerText,left:b.left,right:b.right,top:b.top,bottom:b.bottom,viewport:innerWidth,texts:texts.map(n=>{let r=n.getBoundingClientRect(),c=getComputedStyle(n);return {text:n.innerText,whiteSpace:c.whiteSpace,overflow:c.overflow,textOverflow:c.textOverflow,scrollWidth:n.scrollWidth,clientWidth:n.clientWidth,left:r.left,right:r.right,top:r.top,bottom:r.bottom}})}
      })""")
-     assert label_geometry,'No visible action buttons in viewport'
+     assert len(label_geometry)==len(clinical_labels)-1==23,('Expected all 23 initially visible actions',len(label_geometry))
      for button in label_geometry:
       matching=[label for aid,label in clinical_labels.items() if button['key'].endswith('_'+aid)]
       assert len(matching)==1 and re.sub(r'\s+','',button['label'])==re.sub(r'\s+','',matching[0]),button
@@ -156,8 +216,14 @@ def main():
      page.screenshot(path=str(out/('competition_clinical_labels_'+size+'.png')),full_page=True)
      status.setdefault('competition_flow_checks',[]).append({'check':'clinical_action_labels_no_ellipsis_or_overflow','viewport':viewport,'buttons':len(label_geometry),'status':'PASS'})
     page.set_viewport_size({'width':1440,'height':1100})
-    expand=page.locator('[data-testid="stSidebarCollapsedControl"] button')
-    if expand.count() and expand.is_visible():expand.click()
+    desktop_sidebar=stable_sidebar()
+    if desktop_sidebar['collapsed']:
+     expand=page.locator('[data-testid="stSidebarCollapsedControl"] button')
+     expect(expand).to_have_count(1)
+     assert expand.evaluate('(n)=>{const r=n.getBoundingClientRect();const x=r.left+r.width/2,y=r.top+r.height/2;return r.width>0&&r.height>0&&x>=0&&x<innerWidth&&y>=0&&y<innerHeight}'),'Sidebar expand control is outside viewport'
+     expand.click()
+     assert not stable_sidebar()['collapsed'],'Desktop sidebar did not reopen'
+
     last_stage_key=''
     for clinical_phase in ('基线评估','模拟培训','培训后考核'):
      phase_key=action_key('stop_infusion')
